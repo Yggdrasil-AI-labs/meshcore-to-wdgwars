@@ -91,7 +91,7 @@ Records batch in chunks of **1000** per request.
 | _Raw MQTT capture_ | _Planned_ | `mosquitto_sub` against a Meshcore broker |
 | _Cardputer ADV LoRa cap log_ | _Planned_ | M5Stack Cardputer Advanced with LoRa module |
 
-Italicised rows are not yet implemented — they are on the roadmap once sample data lands.
+Italicised rows are not yet implemented — they are on the roadmap once sample data lands. **Have a real capture you can share? See the pinned ["Wanted: real-world Meshcore capture samples"](https://github.com/HiroAlleyCat/meshcore-to-wdgwars/issues/1) issue for what we're looking for and how to scrub before sending.**
 
 ---
 
