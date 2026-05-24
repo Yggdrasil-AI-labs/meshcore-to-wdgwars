@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HEIMDALL // WDG MESHCORE INGEST</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script>
+  if (/\.github\.io$/i.test(location.hostname)) {
+    document.documentElement.classList.add("public-deploy");
+  }
+</script>
+<style>
+  :root {
+    --bg: #000;
+    --cyan: #00e5ff;
+    --cyan-hot: #33ecff;
+    --pink: #ff004d;
+    --green: #00e436;
+    --amber: #fbbf24;
+    --text: #e0e0e0;
+    --muted: #808080;
+    --panel: rgba(0,229,255,0.04);
+    --panel-hi: rgba(0,229,255,0.12);
+    --b-dim: rgba(0,229,255,0.15);
+    --b-mid: rgba(0,229,255,0.20);
+    --b-hot: rgba(0,229,255,0.45);
+    --display: 'Orbitron', system-ui, sans-serif;
+    --mono: 'Share Tech Mono', ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1.55;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.18) 2px, rgba(0,0,0,0.18) 4px);
+    z-index: 100;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.45) 100%);
+    z-index: 99;
+  }
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+    position: relative;
+    z-index: 1;
+  }
+  header { margin-bottom: 32px; position: relative; }
+  .brand-tag {
+    font-family: var(--mono);
+    color: var(--cyan);
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    display: block;
+    margin-bottom: 8px;
+    opacity: 0.85;
+  }
+  .header-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    gap: 8px;
+  }
+  .header-actions a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid var(--b-hot);
+    color: var(--cyan);
+    text-decoration: none;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    background: rgba(0,229,255,0.04);
+    transition: background 0.15s, box-shadow 0.15s, color 0.15s;
+  }
+  .header-actions a:hover {
+    background: var(--cyan);
+    color: var(--bg);
+    box-shadow: 0 0 20px rgba(0,229,255,0.4);
+  }
+  .header-actions a .arrow { font-size: 10px; opacity: 0.7; }
+  @media (max-width: 600px) {
+    .header-actions { position: static; margin-bottom: 14px; }
+  }
+  header h1 {
+    font-family: var(--display);
+    font-weight: 900;
+    font-size: 48px;
+    letter-spacing: 0.12em;
+    margin: 0 0 8px;
+    color: var(--cyan);
+    text-shadow: 0 0 20px rgba(0,229,255,0.5), 0 0 40px rgba(0,229,255,0.2);
+  }
+  header .tag {
+    margin: 0;
+    font-family: var(--mono);
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.05em;
+  }
+  header .tag span { color: var(--cyan); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--b-dim);
+    border-radius: 4px;
+    padding: 20px;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .panel-label {
+    display: block;
+    font-family: var(--mono);
+    color: var(--cyan);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    opacity: 0.85;
+  }
+  .panel-label::before { content: "// "; opacity: 0.5; }
+
+  .drop {
+    border: 1px dashed var(--b-mid);
+    border-radius: 4px;
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.2s;
+    background: rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .drop:hover, .drop:focus-visible {
+    border-color: var(--cyan);
+    background: var(--panel-hi);
+    box-shadow: inset 0 0 30px rgba(0,229,255,0.06), 0 0 20px rgba(0,229,255,0.1);
+    outline: none;
+  }
+  .drop.drag {
+    border-color: var(--cyan);
+    border-style: solid;
+    background: rgba(0,229,255,0.10);
+    box-shadow: inset 0 0 40px rgba(0,229,255,0.18), 0 0 40px rgba(0,229,255,0.3);
+  }
+  .drop strong {
+    display: block;
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 0.2em;
+    color: var(--cyan);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  .drop small {
+    display: block;
+    font-family: var(--mono);
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .drop .formats {
+    display: block;
+    font-family: var(--mono);
+    color: var(--cyan);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    opacity: 0.7;
+    margin-top: 14px;
+  }
+  .drop input { display: none; }
+
+  .status {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 14px;
+    min-height: 20px;
+    letter-spacing: 0.03em;
+    white-space: pre-wrap;
+  }
+  .status::before { content: "> "; color: var(--cyan); opacity: 0.6; }
+  .status.ok    { color: var(--green); }
+  .status.warn  { color: var(--amber); }
+  .status.err   { color: var(--pink); }
+  .status.ok::before    { color: var(--green); content: "[OK] "; }
+  .status.warn::before  { color: var(--amber); content: "[WARN] "; }
+  .status.err::before   { color: var(--pink);  content: "[ERR] "; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+  button {
+    background: transparent;
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 10px 18px;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: background 0.15s, box-shadow 0.15s, color 0.15s;
+  }
+  button:hover:not(:disabled) {
+    background: var(--cyan);
+    color: var(--bg);
+    box-shadow: 0 0 20px rgba(0,229,255,0.5);
+  }
+  button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    border-color: var(--muted);
+    color: var(--muted);
+  }
+  button.primary {
+    background: var(--cyan);
+    color: var(--bg);
+    box-shadow: 0 0 12px rgba(0,229,255,0.3);
+  }
+  button.primary:hover:not(:disabled) {
+    background: var(--cyan-hot);
+    box-shadow: 0 0 30px rgba(0,229,255,0.6);
+  }
+
+  .dry-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 8px 14px;
+    border: 1px solid var(--b-dim);
+    border-radius: 3px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+    background: rgba(0,0,0,0.3);
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .dry-toggle:hover { border-color: var(--b-hot); color: var(--cyan); }
+  .dry-toggle input { accent-color: var(--amber); margin: 0; }
+  .dry-toggle:has(input:checked) {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: rgba(251,191,36,0.05);
+  }
+  .dry-output {
+    display: none;
+    margin-top: 12px;
+    padding: 14px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(251,191,36,0.3);
+    border-radius: 3px;
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+    overflow-x: auto;
+    max-height: 320px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .dry-output.show { display: block; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .pill {
+    display: inline-flex; align-items: center;
+    padding: 4px 10px;
+    border: 1px solid var(--b-mid);
+    background: rgba(0,229,255,0.05);
+    color: var(--text);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .pill.ok    { color: var(--green); border-color: rgba(0,228,54,0.4); background: rgba(0,228,54,0.06); }
+  .pill.warn  { color: var(--amber); border-color: rgba(251,191,36,0.5); background: rgba(251,191,36,0.06); }
+  .pill.cyan  { color: var(--cyan);  border-color: var(--b-hot); }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 14px;
+    font-family: var(--mono); font-size: 12px; }
+  th {
+    text-align: left; padding: 8px;
+    color: var(--cyan);
+    border-bottom: 1px solid var(--b-mid);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: normal;
+    font-size: 11px;
+  }
+  td { padding: 6px 8px; border-bottom: 1px solid rgba(0,229,255,0.05); }
+  tr:hover td { background: rgba(0,229,255,0.04); }
+  td.muted { color: var(--muted); text-align: center; }
+
+  .results { display: none; }
+  .results.show { display: block; }
+
+  details.panel { padding: 14px 20px; }
+  details summary {
+    cursor: pointer; user-select: none;
+    list-style: none;
+    color: var(--cyan);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 4px 0;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "[+] "; }
+  details[open] summary::before { content: "[-] "; }
+  details[open] { padding-bottom: 18px; }
+  label {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 14px;
+  }
+  input[type="text"], input[type="password"] {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid var(--b-dim);
+    color: var(--cyan);
+    padding: 9px 11px;
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 13px;
+    width: 100%;
+    margin-top: 6px;
+    letter-spacing: 0.05em;
+  }
+  input[type="text"]:focus, input[type="password"]:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 8px rgba(0,229,255,0.25);
+  }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 10px;
+    letter-spacing: 0.05em; line-height: 1.5; }
+  .hint a { color: var(--cyan); text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
+  #player-hint {
+    margin-top: 14px; padding: 12px 14px;
+    background: rgba(0,229,255,0.04);
+    border-left: 2px solid var(--cyan);
+    border-radius: 2px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  html.public-deploy #upload,
+  html.public-deploy .dry-toggle,
+  html.public-deploy #upload-status,
+  html.public-deploy #dry-output,
+  html.public-deploy .settings-panel,
+  html.public-deploy .self-hosted-only { display: none !important; }
+  html:not(.public-deploy) .public-only { display: none !important; }
+
+  footer {
+    margin-top: 36px;
+    padding-top: 18px;
+    border-top: 1px solid var(--b-dim);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--muted);
+    font-size: 11px;
+    font-family: var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  footer a { color: var(--cyan); text-decoration: none; }
+  footer a:hover { color: var(--cyan-hot); text-shadow: 0 0 6px rgba(0,229,255,0.5); }
+
+  .spinner {
+    display: inline-block; width: 10px; height: 10px;
+    border: 1px solid var(--b-dim);
+    border-top-color: var(--cyan);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @keyframes blink { 50% { opacity: 0; } }
+  .cursor { display: inline-block; width: 8px; height: 14px;
+    background: var(--cyan); vertical-align: text-bottom;
+    animation: blink 1s steps(1) infinite; margin-left: 2px; }
+
+  @media (max-width: 600px) {
+    .wrap { padding: 24px 16px 60px; }
+    header h1 { font-size: 36px; letter-spacing: 0.1em; }
+    .drop { padding: 32px 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="header-actions">
+      <a href="https://wdgwars.pl" target="_blank" rel="noopener">
+        Go to WDG <span class="arrow">↗</span>
+      </a>
+    </div>
+    <span class="brand-tag">[ WDG // MESHCORE INGEST NODE ]</span>
+    <h1>HEIMDALL</h1>
+    <p class="tag">/ meshmapper csv <span>→</span> wdgwars meshcore / browser-local / no install required /</p>
+  </header>
+
+  <div class="panel">
+    <span class="panel-label">drop zone</span>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop MeshMapper CSV here">
+      <strong>Drop MeshMapper CSV</strong>
+      <small>or click to browse</small>
+      <span class="formats">.csv .txt // MeshMapper "Logs → Copy CSV" export</span>
+      <input type="file" id="file" accept=".csv,.txt,text/csv,text/plain">
+    </div>
+    <div class="status" id="status"><span class="spinner"></span>booting heimdall runtime...</div>
+  </div>
+
+  <div class="panel results" id="results">
+    <span class="panel-label">decoded // meshcore_nodes</span>
+    <div class="pills" id="summary"></div>
+    <table id="preview"><thead><tr>
+      <th>NODE_ID</th><th>TYPE</th><th>LAT</th><th>LON</th><th>RSSI</th><th>SNR</th>
+    </tr></thead><tbody></tbody></table>
+    <div class="row">
+      <button id="download" class="primary">↓ Download JSON</button>
+      <button id="upload">↑ Direct upload (API)</button>
+      <label class="dry-toggle">
+        <input type="checkbox" id="dryrun"> Dry run (build & log, do not send)
+      </label>
+    </div>
+    <div class="hint" id="player-hint">
+      <strong style="color:var(--cyan)">Next step:</strong> click <em>Download JSON</em>, then drag the file into the upload form on <a href="https://wdgwars.pl" target="_blank" rel="noopener">wdgwars.pl</a>. <span class="self-hosted-only">Direct API upload is also available — click <em>Direct upload (API)</em> with your key set in the panel below.</span><span class="public-only">Power users: the <a href="https://github.com/HiroAlleyCat/meshcore-to-wdgwars" target="_blank" rel="noopener">CLI</a> can upload directly via HMAC, and a self-hosted Heimdall (with the included <code>serve.py</code> proxy) gets browser-side direct upload too.</span>
+    </div>
+    <div class="status" id="upload-status" style="margin-top:12px"></div>
+    <pre id="dry-output" class="dry-output"></pre>
+  </div>
+
+  <details class="panel settings-panel">
+    <summary>uplink config</summary>
+    <label>WDGoWars API key
+      <input type="password" id="apikey" placeholder="paste key — stored only in this browser">
+    </label>
+    <label>Endpoint
+      <input type="text" id="apiurl" value="https://wdgwars.pl/api/upload/">
+    </label>
+    <div class="hint">Key lives in this browser's localStorage and is only sent to the endpoint above. Clear it any time by emptying the field and saving.</div>
+  </details>
+
+  <footer>
+    <span><span class="pill cyan" id="version-pill">heimdall ?</span></span>
+    <a href="https://github.com/HiroAlleyCat/meshcore-to-wdgwars" target="_blank" rel="noopener">github.com/HiroAlleyCat/meshcore-to-wdgwars</a>
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script type="module" src="./app.js?v=0.1.0"></script>
+</body>
+</html>

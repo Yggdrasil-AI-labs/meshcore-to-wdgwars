@@ -1,0 +1,64 @@
+name: Deploy web frontend to Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "heimdall.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Always ship the latest root heimdall.py into web/. The web bundle's
+      # copy is regenerated here so a release-tagged commit gets the right
+      # parser even if a contributor forgot to cp it.
+      - name: Sync heimdall.py into web/
+        run: cp heimdall.py web/heimdall.py
+
+      # Stamp a per-deploy cache-bust onto the app.js URL in index.html.
+      - name: Cache-bust web/app.js URL in index.html
+        run: |
+          VER=$(grep -oP '__version__ = "\K[^"]+' heimdall.py)
+          SHA=$(git rev-parse --short HEAD)
+          STAMP="${VER}-${SHA}"
+          sed -i "s|app.js?v=[^\"]*|app.js?v=${STAMP}|" web/index.html
+          echo "Stamped app.js?v=${STAMP}"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
