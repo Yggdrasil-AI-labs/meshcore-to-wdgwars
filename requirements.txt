@@ -1,0 +1,3 @@
+# Heimdall has no runtime dependencies — pure stdlib Python.
+# This file exists so dependency-scanning tooling does not get confused
+# by its absence. If you add a runtime dep, pin it here.
