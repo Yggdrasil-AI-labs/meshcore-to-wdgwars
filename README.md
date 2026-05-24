@@ -95,6 +95,46 @@ Italicised rows are not yet implemented — they are on the roadmap once sample 
 
 ---
 
+## All command-line flags
+
+```
+python3 heimdall.py CSV [options]
+```
+
+| Flag | Purpose | Default |
+|---|---|---|
+| `csv` (positional) | Path to the MeshMapper CSV export. Required. | — |
+| `--preview` | Parse the file, print the first six normalised rows as JSON, then exit. No envelope build, no upload. Use to sanity-check a fresh export. | off |
+| `--dry-run` | Build the full HMAC-signed request envelope (same bytes the live upload would send), print a short summary per chunk, but do **not** POST. Use to verify the envelope before pointing it at the live API. | off |
+| `--api-key KEY` | WDGoWars API key. Overrides the `WDGWARS_API_KEY` env var. | env var |
+| `--endpoint URL` | Override the WDGoWars upload endpoint. | `https://wdgwars.pl/api/upload/` |
+| `-h`, `--help` | Print help and exit. | — |
+
+### Examples
+
+```bash
+# Sanity-check a fresh export
+python3 heimdall.py my-capture.csv --preview
+
+# Build envelope but don't POST (use to verify HMAC + payload shape)
+WDGWARS_API_KEY=YOUR_KEY python3 heimdall.py my-capture.csv --dry-run
+
+# Real upload, key on command line
+python3 heimdall.py my-capture.csv --api-key YOUR_KEY
+
+# Real upload, key in env (preferred — keeps the key out of shell history)
+export WDGWARS_API_KEY=YOUR_KEY
+python3 heimdall.py my-capture.csv
+
+# Point at a self-hosted proxy (see web/serve.py)
+python3 heimdall.py my-capture.csv --api-key YOUR_KEY \
+  --endpoint http://127.0.0.1:8765/api/upload/
+```
+
+Records batch in chunks of **1000** per request, hardcoded in v0.1.0.
+
+---
+
 ## Architecture
 
 ```
