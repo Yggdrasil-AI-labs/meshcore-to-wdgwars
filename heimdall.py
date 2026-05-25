@@ -26,7 +26,20 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import os as _os
+
 __version__ = "0.1.0"
+
+_USE_COLOR = sys.stderr.isatty() and _os.environ.get("NO_COLOR") is None
+
+def _tag(label: str, code: str) -> str:
+    if _USE_COLOR:
+        return f"\033[{code}m{label}\033[0m"
+    return label
+
+def _OK():   return _tag("[OK]", "1;32")
+def _FAIL(): return _tag("[FAIL]", "1;31")
+def _INFO(): return _tag("[..]", "1;36")
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
 BATCH_SIZE = 1000
@@ -168,9 +181,30 @@ def main(argv: list[str] | None = None) -> int:
         print("missing API key: pass --api-key or set WDGWARS_API_KEY", file=sys.stderr)
         return 2
 
+    rc = 0
     for status, body in upload(nodes, key, endpoint=args.endpoint, dry_run=args.dry_run):
-        print(f"[{status}] {body[:200]}")
-    return 0
+        if status == 0:
+            print(f"{_INFO()} {body}", file=sys.stderr)
+            continue
+        if 200 <= status < 300:
+            try:
+                data = json.loads(body)
+                imp = data.get("meshcore_imported", 0)
+                seen = data.get("meshcore_already_seen", 0)
+                badges = data.get("new_badges") or []
+                print(f"{_OK()} accepted by wdgwars.pl. "
+                      f"{imp} new meshcore nodes, {seen} already on your account.",
+                      file=sys.stderr)
+                if badges:
+                    print(f"  new badges: {badges}", file=sys.stderr)
+            except Exception:
+                print(f"{_OK()} accepted by wdgwars.pl (HTTP {status}): {body[:200]}",
+                      file=sys.stderr)
+        else:
+            print(f"{_FAIL()} rejected by wdgwars.pl (HTTP {status}): {body[:200]}",
+                  file=sys.stderr)
+            rc = 1
+    return rc
 
 
 if __name__ == "__main__":
