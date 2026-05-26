@@ -18,20 +18,20 @@ Convert **MeshMapper** "Logs → Copy CSV" exports (and other Meshcore LoRa capt
 
 ## Pick your path
 
-Heimdall will ship in **two flavours** that share the same parsing core. Today, only the CLI exists; the web flavour is in progress.
+Heimdall ships in **two flavours** that share the same parsing core. Both are live.
 
 | | **Web (browser)** | **CLI (terminal)** |
 |---|---|---|
 | **For** | One-off uploads, anyone without Python | Headless boxes, mesh gateways, cron, scripted feeds |
-| **Install** | None — open a URL | Clone repo, run `python3 heimdall.py` |
+| **Install** | None, open a URL | Clone repo, run `python3 heimdall.py` |
 | **Where parsing happens** | In your browser (Pyodide / WASM) | Locally with stdlib Python |
 | **Internet required** | Yes (initial page load) | No (only uploads) |
-| **Runs without a display** | No | **Yes** — headless-safe |
-| **Status** | Planned | **Shipped (alpha)** |
+| **Runs without a display** | No | **Yes**, headless-safe |
+| **Status** | **Shipped** | **Shipped (alpha)** |
 
 If you're on a Raspberry Pi, a server, or anything without a desktop, **use the CLI**. Scroll down to [CLI install](#cli-install).
 
-The web version will live at [hiroalleycat.github.io/meshcore-to-wdgwars](https://hiroalleycat.github.io/meshcore-to-wdgwars/) once it ships.
+The web version lives at [hiroalleycat.github.io/meshcore-to-wdgwars](https://hiroalleycat.github.io/meshcore-to-wdgwars/).
 
 ---
 
