@@ -1,3 +1,8 @@
-# Heimdall has no runtime dependencies — pure stdlib Python.
-# This file exists so dependency-scanning tooling does not get confused
-# by its absence. If you add a runtime dep, pin it here.
+# Required: shared transport client for wdgwars.pl (HMAC envelope, retry,
+# cooldown, silent-drop detection). Same library Muninn and (soon)
+# wigle-to-wdgwars sit on.
+#
+# Pinned to the v0.1.1 tag for reproducibility. Bumped deliberately;
+# not floating on gungnir main. Switch to a normal `gungnir>=X.Y`
+# pin once gungnir publishes to PyPI.
+gungnir @ git+https://github.com/HiroAlleyCat/gungnir@v0.1.1

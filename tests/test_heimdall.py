@@ -1,11 +1,13 @@
-"""Smoke tests for Heimdall v0.1.0.
+"""Smoke tests for Heimdall v0.2.
+
+Parser tests cover the Heimdall-specific work (MeshMapper CSV → mesh
+schema). Envelope/transport correctness lives in gungnir's tests.
 
 Run: python -m unittest tests/test_heimdall.py
 """
 from __future__ import annotations
+
 import base64
-import hashlib
-import hmac
 import json
 import sys
 import tempfile
@@ -78,76 +80,42 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(rows[0]["node_id"], "abc")
 
 
-class EnvelopeTests(unittest.TestCase):
+class EnvelopeShimTests(unittest.TestCase):
+    """heimdall.build_envelope() is a thin shim over gungnir for back-
+    compat — verify shape + meshcore-slot population. Cryptographic
+    correctness is gungnir's responsibility (proven by its own tests
+    + the byte-identical Muninn parity test)."""
+
+    def _sample_node(self):
+        return [{"timestamp": "t", "node_id": "E4", "type": "repeater",
+                 "name": "", "lat": 0.0, "lon": 0.0, "rssi": -100.0, "snr": 1.0}]
+
     def test_envelope_shape(self):
-        rows = [
-            {"timestamp": "t", "node_id": "E4", "type": "repeater", "name": "",
-             "lat": 0.0, "lon": 0.0, "rssi": -100.0, "snr": 1.0}
-        ]
-        env = heimdall.build_envelope(rows, "test-key")
+        env = heimdall.build_envelope(self._sample_node(), "test-key")
         self.assertIn("data", env)
         self.assertIn("nonce", env)
         self.assertIn("sig", env)
-        # nonce is 16 hex chars (token_hex(8))
         self.assertEqual(len(env["nonce"]), 16)
-        # sig is 64 hex chars (sha256)
         self.assertEqual(len(env["sig"]), 64)
 
-    def test_envelope_signature_reproducible(self):
-        rows = [
-            {"timestamp": "t", "node_id": "E4", "type": "repeater", "name": "",
-             "lat": 0.0, "lon": 0.0, "rssi": -100.0, "snr": 1.0}
-        ]
-        # Rebuild a known envelope and verify the HMAC manually
-        body = {"networks": [], "aircraft": [], "meshcore_nodes": rows}
-        body_json = json.dumps(body, separators=(",", ":"))
-        data_b64 = base64.b64encode(body_json.encode()).decode()
-        nonce = "0123456789abcdef"
-        expected_sig = hmac.new(
-            b"test-key", (nonce + data_b64).encode(), hashlib.sha256
-        ).hexdigest()
-        # Compare against the envelope-build path with a fixed nonce by
-        # patching secrets briefly
-        import secrets as secrets_mod
-        orig = secrets_mod.token_hex
-        try:
-            secrets_mod.token_hex = lambda n=8: "0123456789abcdef"
-            env = heimdall.build_envelope(rows, "test-key")
-            self.assertEqual(env["nonce"], nonce)
-            self.assertEqual(env["sig"], expected_sig)
-            self.assertEqual(env["data"], data_b64)
-        finally:
-            secrets_mod.token_hex = orig
-
     def test_meshcore_slot_populated_aircraft_empty(self):
-        # The whole point of the envelope shape: Heimdall fills meshcore_nodes,
-        # leaves aircraft empty. The inverse of Muninn.
-        rows = [{"timestamp": "t", "node_id": "E4", "type": "repeater",
-                 "name": "", "lat": 0.0, "lon": 0.0, "rssi": -100.0, "snr": 1.0}]
-        env = heimdall.build_envelope(rows, "test-key")
+        """Heimdall fills meshcore_nodes, leaves aircraft empty —
+        the inverse of Muninn. Encoded by gungnir.build_payload()."""
+        env = heimdall.build_envelope(self._sample_node(), "test-key")
         decoded = json.loads(base64.b64decode(env["data"]).decode())
         self.assertEqual(decoded["aircraft"], [])
         self.assertEqual(decoded["networks"], [])
         self.assertEqual(len(decoded["meshcore_nodes"]), 1)
 
 
-class ChunkTests(unittest.TestCase):
-    def test_chunked_yields_correct_sizes(self):
-        data = list(range(2500))
-        chunks = list(heimdall.chunked(data, 1000))
-        self.assertEqual(len(chunks), 3)
-        self.assertEqual(len(chunks[0]), 1000)
-        self.assertEqual(len(chunks[1]), 1000)
-        self.assertEqual(len(chunks[2]), 500)
-
-    def test_chunked_empty(self):
-        self.assertEqual(list(heimdall.chunked([], 1000)), [])
-
-
 class VersionTests(unittest.TestCase):
     def test_version_string(self):
         self.assertIsInstance(heimdall.__version__, str)
         self.assertRegex(heimdall.__version__, r"^\d+\.\d+\.\d+")
+
+    def test_version_is_v02(self):
+        """Sanity check the bump landed."""
+        self.assertTrue(heimdall.__version__.startswith("0.2"))
 
 
 if __name__ == "__main__":

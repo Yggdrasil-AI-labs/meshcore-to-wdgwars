@@ -2,9 +2,8 @@
 """
 heimdall — MeshMapper CSV → WDGoWars meshcore_nodes uplink.
 
-Sibling of Muninn (adsb-to-wdgwars). Same HMAC envelope, same /api/upload/
-endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills
-`meshcore_nodes`.
+Sibling of Muninn (adsb-to-wdgwars). Both sit on the shared `gungnir`
+transport library; this file is the MeshMapper-specific parser and CLI.
 
 Target schema (per the WDGoWars mesh ingest, shared by FusedStamen):
 
@@ -15,23 +14,40 @@ Target schema (per the WDGoWars mesh ingest, shared by FusedStamen):
 from __future__ import annotations
 
 import argparse
-import base64
 import csv
-import hashlib
-import hmac
 import json
-import secrets
+import logging
+import os
 import sys
-import urllib.request
 from pathlib import Path
 from typing import Any
 
-__version__ = "0.1.0"
+import gungnir
 
-DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
-BATCH_SIZE = 1000
+__version__ = "0.2.0"
+GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
+GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
+
+# CLI tool — configure logging so the cron-style "line per event" output
+# users saw in 0.1.x still appears. Library consumers that wire their own
+# root logger override this.
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        stream=sys.stderr,
+    )
+
+# Single Client for the process lifetime. Bundles per-tool identity so
+# we don't thread it through every call.
+_client = gungnir.Client(
+    tool="heimdall",
+    version=__version__,
+    user_agent_extra=GITHUB_URL,
+)
+
+DEFAULT_ENDPOINT = gungnir.DEFAULT_API_URL  # backward-compat alias
 TARGET_FIELDS = ("timestamp", "node_id", "type", "name", "lat", "lon", "rssi", "snr")
-
 
 MESHMAPPER_RX_HEADERS = (
     "timestamp", "repeater_id", "snr", "rssi", "path_length",
@@ -77,6 +93,7 @@ def _normalise_meshmapper_row(row: dict[str, str]) -> dict[str, Any] | None:
 
 
 def parse_meshmapper_csv(path: Path) -> list[dict[str, Any]]:
+    """Read a MeshMapper RX-log CSV and return the normalised node records."""
     with path.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         records = []
@@ -88,21 +105,14 @@ def parse_meshmapper_csv(path: Path) -> list[dict[str, Any]]:
 
 
 def build_envelope(nodes: list[dict[str, Any]], api_key: str) -> dict[str, str]:
-    payload = {"networks": [], "aircraft": [], "meshcore_nodes": nodes}
-    body_json = json.dumps(payload, separators=(",", ":"))
-    data_b64 = base64.b64encode(body_json.encode()).decode()
-    nonce = secrets.token_hex(8)
-    sig = hmac.new(
-        api_key.encode(),
-        (nonce + data_b64).encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    return {"data": data_b64, "nonce": nonce, "sig": sig}
+    """Build the HMAC envelope for a meshcore_nodes payload.
 
-
-def chunked(seq: list[Any], size: int):
-    for i in range(0, len(seq), size):
-        yield seq[i : i + size]
+    Kept as a thin shim over :func:`gungnir.envelope.build_envelope` so
+    test_heimdall.py and any external scripts that imported this name
+    continue to work. New code should call gungnir directly.
+    """
+    payload = gungnir.build_payload(meshcore_nodes=nodes)
+    return gungnir.build_envelope(payload, api_key)
 
 
 def upload(
@@ -110,41 +120,55 @@ def upload(
     api_key: str,
     endpoint: str = DEFAULT_ENDPOINT,
     dry_run: bool = False,
-) -> list[tuple[int, str]]:
-    results = []
-    for chunk in chunked(nodes, BATCH_SIZE):
-        envelope = build_envelope(chunk, api_key)
-        body = json.dumps(envelope).encode()
-        if dry_run:
-            results.append((0, f"dry-run: {len(chunk)} nodes, sig={envelope['sig'][:12]}..."))
-            continue
-        req = urllib.request.Request(
-            endpoint,
-            data=body,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "X-API-Key": api_key,
-                "Accept": "application/json",
-                "User-Agent": "heimdall/0.1.0",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                results.append((resp.status, resp.read().decode(errors="replace")))
-        except urllib.error.HTTPError as e:
-            results.append((e.code, e.read().decode(errors="replace")))
-    return results
+    batch_size: int = 500,
+) -> int:
+    """POST ``nodes`` to wdgwars.pl's signed-JSON endpoint.
+
+    Behavior (inherited from gungnir):
+
+    - Retries 5xx and network errors with exponential backoff.
+    - 429 stops the whole batch and persists a cooldown the next cron
+      tick respects.
+    - Silent-drop pattern (HTTP 200 ok:true with every counter zero)
+      exits non-zero.
+
+    Returns the shell exit code (0 ok, 1 fail). Signature differs from
+    0.1.x — the previous version returned a list of (status, body)
+    tuples; the new version follows the muninn/gungnir convention.
+    """
+    return gungnir.transport.send(
+        "heimdall", __version__, endpoint, api_key,
+        meshcore_nodes=nodes,
+        batch_size=batch_size,
+        dry_run=dry_run,
+        user_agent_extra=GITHUB_URL,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="MeshMapper CSV → WDGoWars meshcore uplink")
-    p.add_argument("csv", type=Path, help="MeshMapper CSV export")
+    p = argparse.ArgumentParser(
+        description="MeshMapper CSV → WDGoWars meshcore uplink",
+    )
+    p.add_argument("csv", type=Path, nargs="?",
+                   help="MeshMapper CSV export (omit with --whoami)")
     p.add_argument("--api-key", help="WDGoWars API key (or set WDGWARS_API_KEY)")
     p.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
+    p.add_argument("--batch-size", type=int, default=500,
+                   help="records per signed POST (default: 500)")
     p.add_argument("--dry-run", action="store_true", help="Build envelope but do not POST")
-    p.add_argument("--preview", action="store_true", help="Print first 6 normalised rows and exit")
+    p.add_argument("--preview", action="store_true",
+                   help="Print first 6 normalised rows and exit")
+    p.add_argument("--whoami", action="store_true",
+                   help="Validate the API key against /api/me and exit")
     args = p.parse_args(argv)
+
+    # whoami uses the api key but no CSV
+    if args.whoami:
+        key = args.api_key or _client.load_key() or os.environ.get("WDGWARS_API_KEY")
+        if not key:
+            print("missing API key: pass --api-key or set WDGWARS_API_KEY", file=sys.stderr)
+            return 2
+        return _client.whoami(key)
 
     if not args.csv.exists():
         print(f"file not found: {args.csv}", file=sys.stderr)
@@ -161,16 +185,13 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(row))
         return 0
 
-    import os
-
-    key = args.api_key or os.environ.get("WDGWARS_API_KEY")
+    key = args.api_key or _client.load_key() or os.environ.get("WDGWARS_API_KEY")
     if not key:
         print("missing API key: pass --api-key or set WDGWARS_API_KEY", file=sys.stderr)
         return 2
 
-    for status, body in upload(nodes, key, endpoint=args.endpoint, dry_run=args.dry_run):
-        print(f"[{status}] {body[:200]}")
-    return 0
+    return upload(nodes, key, endpoint=args.endpoint,
+                  dry_run=args.dry_run, batch_size=args.batch_size)
 
 
 if __name__ == "__main__":
