@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
@@ -405,7 +405,10 @@ def _check_for_update() -> str | None:
 
 def _run_update() -> int:
     """Try to update heimdall in place. Uses `git pull` if we are in a git
-    checkout; otherwise falls back to fetching heimdall.py from raw GitHub."""
+    checkout; otherwise falls back to fetching heimdall.py from raw GitHub.
+    Either path also refreshes requirements.txt and runs pip install, so a
+    future release that adds or bumps a dep doesn't leave the user with an
+    updated heimdall.py importing a module they don't have."""
     import subprocess
     script_dir = Path(__file__).resolve().parent
     git_dir = script_dir / ".git"
@@ -418,6 +421,7 @@ def _run_update() -> int:
             if r.returncode != 0:
                 print(r.stderr.strip(), file=sys.stderr)
                 return r.returncode
+            _pip_install_requirements(script_dir)
             print(f"[heimdall] now on heimdall v{__version__} (re-run with "
                   f"--version to confirm latest)", file=sys.stderr)
             return 0
@@ -429,9 +433,82 @@ def _run_update() -> int:
         return _update_from_raw(script_dir)
 
 
+def _fetch_raw(path: str, dest: Path) -> bool:
+    """Fetch a file from the repo's main branch to dest atomically.
+    Returns True on success, False on failure (logs the reason)."""
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{path}"
+    print(f"[heimdall] fetching {path} from {raw_url}", file=sys.stderr)
+    try:
+        req = urllib.request.Request(raw_url, headers={
+            "User-Agent": f"heimdall/{__version__}"})
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as r:
+            body = r.read()
+    except Exception as e:
+        print(f"[heimdall] download of {path} failed: {e}", file=sys.stderr)
+        return False
+    tmp = dest.with_suffix(dest.suffix + ".new")
+    try:
+        tmp.write_bytes(body)
+        os.replace(tmp, dest)
+    except OSError as e:
+        print(f"[heimdall] couldn't write {dest}: {e}", file=sys.stderr)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _pip_install_requirements(script_dir: Path) -> None:
+    """Best-effort `python -m pip install -r requirements.txt` against the
+    interpreter currently running heimdall. Never fails the caller — prints
+    a clear hint if pip is missing or the install errors out, so the update
+    return code still reflects the heimdall.py update itself.
+
+    Heimdall has no third-party deps today (requirements.txt is a
+    comment-only placeholder), so this is a no-op in practice. The helper
+    is here so future releases that add a dep self-heal without needing
+    another wrapper-script revision."""
+    import subprocess
+    req = script_dir / "requirements.txt"
+    if not req.exists():
+        return
+    # Skip entirely if requirements.txt has no actual install lines —
+    # avoids printing a misleading "installing deps" banner when there's
+    # nothing to install.
+    has_deps = any(
+        line.strip() and not line.lstrip().startswith("#")
+        for line in req.read_text(encoding="utf-8", errors="replace").splitlines()
+    )
+    if not has_deps:
+        return
+    print(f"[heimdall] installing/refreshing deps from {req.name} "
+          f"(python -m pip install --upgrade -r requirements.txt)", file=sys.stderr)
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade",
+                            "-r", str(req)], timeout=300)
+    except FileNotFoundError:
+        print("[heimdall] python not found to invoke pip; run "
+              "`python -m pip install -r requirements.txt` manually.",
+              file=sys.stderr)
+        return
+    except subprocess.TimeoutExpired:
+        print("[heimdall] pip install timed out; run "
+              "`python -m pip install -r requirements.txt` manually.",
+              file=sys.stderr)
+        return
+    if r.returncode != 0:
+        print(f"[heimdall] pip install exited {r.returncode}; if the import "
+              f"errors below mention a missing module, run "
+              f"`python -m pip install -r requirements.txt` manually.",
+              file=sys.stderr)
+
+
 def _update_from_raw(script_dir: Path) -> int:
-    """Non-git fallback for --update: fetch heimdall.py from raw GitHub and
-    replace the local file atomically. Works for ZIP-downloaded installs."""
+    """Non-git fallback for --update: fetch heimdall.py + requirements.txt
+    from raw GitHub and replace the local files atomically, then refresh
+    deps. Works for ZIP-downloaded installs."""
     target = script_dir / "heimdall.py"
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/heimdall.py"
     print(f"[heimdall] not a git checkout. Fetching latest heimdall.py from "
@@ -458,8 +535,10 @@ def _update_from_raw(script_dir: Path) -> int:
                    new_text, _re.MULTILINE)
     new_version = m.group(1) if m else "?"
     if new_version == __version__:
-        print(f"[heimdall] already on the latest (v{__version__}). Nothing to do.",
-              file=sys.stderr)
+        print(f"[heimdall] already on the latest (v{__version__}). Refreshing "
+              f"requirements.txt in case a pinned dep moved.", file=sys.stderr)
+        _fetch_raw("requirements.txt", script_dir / "requirements.txt")
+        _pip_install_requirements(script_dir)
         return 0
     tmp = target.with_suffix(".py.new")
     try:
@@ -473,6 +552,8 @@ def _update_from_raw(script_dir: Path) -> int:
             pass
         return 1
     print(f"[heimdall] updated v{__version__} to v{new_version}", file=sys.stderr)
+    _fetch_raw("requirements.txt", script_dir / "requirements.txt")
+    _pip_install_requirements(script_dir)
     print(f"[heimdall] re-run heimdall to pick up the new code "
           f"(the current process is still running the old version).",
           file=sys.stderr)

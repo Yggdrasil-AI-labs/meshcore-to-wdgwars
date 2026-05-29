@@ -4,6 +4,42 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-05-29 - Harden install/update path (preventive)
+
+Heimdall has no third-party dependencies today and isn't broken by
+the install issue that hit Muninn 2.0.1 and wigle-to-wdgwars 1.1.0
+(see those changelogs for context). This release applies the same
+hardening pattern preventively, so that when Heimdall eventually
+migrates its inline HMAC code to the shared `gungnir` library
+(matching its siblings), the bootstrap is already robust and no
+user hits a `ModuleNotFoundError` on first install or first update
+after the dep is added.
+
+### Fixed
+
+- **`heimdall.py --update` now refreshes `requirements.txt` and runs
+  `python -m pip install --upgrade -r requirements.txt` against
+  `sys.executable` after updating the script.** Today this is a no-op
+  (requirements.txt is comment-only); the helper exits early without
+  printing a misleading "installing deps" banner when there's nothing
+  to install. The plumbing is in place so a future dep-bumping release
+  self-heals without needing another wrapper-script revision.
+
+### Added
+
+- **`setup.bat` / `setup.sh` / `update.bat` / `update.sh` now check
+  for Python ≥ 3.10 first, fetch `requirements.txt` from `main`, run
+  `pip install --upgrade -r requirements.txt`, then invoke
+  `heimdall.py`.** Order matters across versions that add or bump a
+  dep — pip has to know about the new dep before heimdall.py tries to
+  import it. Previously the wrappers just ran `python heimdall.py
+  --setup` (or `--update`) with no dep management at all.
+
+- `_fetch_raw(path, dest)` and `_pip_install_requirements(script_dir)`
+  helpers in `heimdall.py` — used by `--update` to refresh sibling
+  files atomically and invoke pip against the currently-running
+  interpreter.
+
 ## [0.2.0]
 
 ### Added
