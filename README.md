@@ -14,6 +14,15 @@ Convert **MeshMapper** "Logs → Copy CSV" exports (and other Meshcore LoRa capt
 
 **Scope:** Heimdall is for **Meshcore LoRa observations from your own captures**. The WDGoWars mesh channel is specifically for Meshcore (LoRa, sub-GHz). Other 802.15.4 traffic — Zigbee, Thread, generic mesh-sounding protocols — does not belong here and will not be accepted upstream. If your data came from a real Meshcore receiver (MeshMapper app, T-Beam running Meshcore Companion, Cardputer ADV + LoRa cap, Heltec V3, etc.), you're in the right place.
 
+## Family
+
+Sibling repos in the WDGoWars feeder family:
+
+- [Muninn](https://github.com/HiroAlleyCat/adsb-to-wdgwars) — ADS-B feeder
+- [wigle-to-wdgwars](https://github.com/HiroAlleyCat/wigle-to-wdgwars) — WiGLE Wi-Fi/BLE feeder
+- [gungnir](https://github.com/HiroAlleyCat/gungnir) — shared HMAC transport library
+- [wdgwars-api-tester](https://github.com/HiroAlleyCat/wdgwars-api-tester) — API surface probe
+
 ---
 
 ## Pick your path
