@@ -4,6 +4,35 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-06-01 - setup.sh: PEP 668 / Bookworm fix
+
+`setup.sh`, `run.sh`, and `update.sh` now install Heimdall into a
+project-local `.venv/` instead of the system Python.
+
+On Raspberry Pi OS Bookworm, Debian 12+, Ubuntu 23.04+, and Homebrew
+Python, the previous `python3 -m pip install -r requirements.txt` line
+errored out with `error: externally-managed-environment` (PEP 668).
+The script crashed before saving the API key. Same flaw as Muninn's
+v2.0.8 fix, found by sweeping the feeder family after a Pi24 user
+reported the Muninn crash in the WDGoWars Discord.
+
+The wrappers now `python3 -m venv .venv` on first run and call
+`.venv/bin/python` for every subsequent step. `run.sh` and `update.sh`
+detect the venv and reuse it. If `python3 -m venv` itself fails
+(the `python3-venv` apt package missing on some Pi images), the
+script prints the exact `sudo apt install -y python3-venv python3-full`
+line and exits cleanly instead of leaving a half-installed state.
+
+Heimdall has no third-party deps today, so this is mostly future-proofing
+the wrapper — but it removes the Bookworm crash that bit anyone running
+`./setup.sh` to save their API key.
+
+### Fixed
+
+- `setup.sh` no longer fails with `externally-managed-environment` on
+  PEP 668 distros. Installs into `.venv/` instead.
+- `run.sh` and `update.sh` now use `.venv/bin/python` when present.
+
 ## [0.2.1] - 2026-05-29 - Harden install/update path (preventive)
 
 Heimdall has no third-party dependencies today and isn't broken by

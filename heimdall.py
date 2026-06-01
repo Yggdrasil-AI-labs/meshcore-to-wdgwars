@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
