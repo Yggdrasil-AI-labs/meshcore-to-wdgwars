@@ -23,6 +23,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Run unit tests
+        # CI runners never have a real WDGoWars key, so the live-key
+        # safety guard is a no-op here. Setting it explicitly tags
+        # intent for the day CI runs on self-hosted hardware.
+        env:
+          HEIMDALL_TEST_ALLOW_LIVE_KEY: "1"
         run: python -m unittest discover -s tests -v
 
       - name: Smoke-test CLI
