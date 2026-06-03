@@ -23,7 +23,9 @@ import hmac
 import json
 import os
 import secrets
+import shutil
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -32,12 +34,18 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
 ME_API_URL = "https://wdgwars.pl/api/me"
 BATCH_SIZE = 1000
+
+# ── Scheduler constants ─────────────────────────────────────────────────────
+SCHEDULE_MARKER = "managed-by-heimdall"
+SYSTEMD_UNIT_NAME = "heimdall"  # .service + .timer share this stem
+WINDOWS_TASK_NAME = "Heimdall"
+DEFAULT_SCHEDULE_TIME = "03:00"
 TARGET_FIELDS = ("timestamp", "node_id", "type", "name", "lat", "lon", "rssi", "snr")
 
 MESHMAPPER_RX_HEADERS = (
@@ -185,8 +193,14 @@ def check_whoami(key: str) -> int:
 
 def _prompt_yes_no(question: str, default: bool = True) -> bool:
     """Ask a y/n question on stderr. Returns the default on EOF or Ctrl+C
-    so non-interactive runs do not hang."""
+    so non-interactive runs do not hang.
+
+    Always emits a newline after the answer when stdin is piped — interactive
+    TTY input gets its newline from the terminal, piped input doesn't, which
+    would otherwise glue the next section header onto the prompt line.
+    """
     suffix = " [Y/n] " if default else " [y/N] "
+    piped = not sys.stdin.isatty()
     while True:
         try:
             print(question + suffix, end="", flush=True, file=sys.stderr)
@@ -195,6 +209,8 @@ def _prompt_yes_no(question: str, default: bool = True) -> bool:
                 print("", file=sys.stderr)
                 return default
             ans = line.strip().lower()
+            if piped:
+                print("", file=sys.stderr)
         except (KeyboardInterrupt, EOFError):
             print("", file=sys.stderr)
             return default
@@ -561,6 +577,335 @@ def _update_from_raw(script_dir: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Scheduler: install/remove a daily timer on systemd / cron / schtasks
+# ---------------------------------------------------------------------------
+#
+# Mechanism per OS, matching wigle-to-wdgwars exactly:
+#   Linux with systemd  → user systemd units in ~/.config/systemd/user/
+#                         (timer + service, OnCalendar daily at HH:MM)
+#   Linux without systemd, macOS → user crontab
+#   Windows             → schtasks /Create /SC DAILY /ST HH:MM
+#
+# Heimdall, unlike wigle, has no pull-from-source flavour. The schedule
+# must point at a CSV file the user keeps refreshing (e.g. their nightly
+# MeshMapper export). --schedule-csv is the required input for the
+# headless install; the wizard variant prompts for it.
+#
+# A "# managed-by-heimdall" marker comment goes into every artifact so
+# --unschedule can find and remove them cleanly without touching the
+# user's own crontab/systemd unit dir entries.
+
+def _python_exe() -> str:
+    return sys.executable
+
+
+def _script_path() -> Path:
+    return Path(__file__).resolve()
+
+
+def _systemd_user_dir() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "systemd" / "user"
+
+
+def _has_systemd() -> bool:
+    """True only on a Linux host that actually runs systemd as PID 1 and
+    has systemctl on PATH. Avoids the WSL false-positive where systemctl
+    is installed but `/run/systemd/system` is absent."""
+    if not sys.platform.startswith("linux"):
+        return False
+    if shutil.which("systemctl") is None:
+        return False
+    return Path("/run/systemd/system").exists()
+
+
+def _schedule_mechanism() -> str:
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform.startswith("linux") and _has_systemd():
+        return "systemd"
+    return "cron"
+
+
+def _validate_hhmm(s: str) -> str:
+    """Parse 'HH:MM' (24h). Returns canonical 'HH:MM' or raises ValueError."""
+    parts = s.strip().split(":")
+    if len(parts) != 2:
+        raise ValueError(f"time must be HH:MM, got {s!r}")
+    hh = int(parts[0])
+    mm = int(parts[1])
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        raise ValueError(f"time out of range: {s!r}")
+    return f"{hh:02d}:{mm:02d}"
+
+
+def _shell_quote(s: str) -> str:
+    """Minimal POSIX shell quoting for systemd ExecStart and cron lines."""
+    if not s:
+        return "''"
+    safe = ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "0123456789@%_-+=:,./")
+    if all(c in safe for c in s):
+        return s
+    return "'" + s.replace("'", "'\"'\"'") + "'"
+
+
+def _schedule_argv(csv_path: Path) -> list[str]:
+    """Build the heimdall argv that the scheduler will run.
+
+    Always reads the saved key from disk (no --key on the command line — that
+    would leak the secret into the unit file / crontab / schtasks output,
+    all of which are readable by other processes on the box).
+    """
+    return [_python_exe(), str(_script_path()), str(csv_path)]
+
+
+# ── Pure renderers (no side effects, easy to unit-test) ─────────────────────
+
+def render_systemd_units(time_hhmm: str, csv_path: Path,
+                         python_exe: str, script_path: Path,
+                         dry_run: bool = False) -> dict[str, str]:
+    """Render (service, timer) unit text. Pure — does not touch disk."""
+    time_hhmm = _validate_hhmm(time_hhmm)
+    argv = [python_exe, str(script_path), str(csv_path)]
+    if dry_run:
+        argv.append("--dry-run")
+    exec_start = " ".join(_shell_quote(a) for a in argv)
+    desc_suffix = " [DRY-RUN]" if dry_run else ""
+    service = (
+        "[Unit]\n"
+        f"Description=Heimdall daily MeshCore push{desc_suffix}\n"
+        f"# {SCHEDULE_MARKER}\n"
+        "After=network-online.target\n"
+        "Wants=network-online.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"ExecStart={exec_start}\n"
+    )
+    timer = (
+        "[Unit]\n"
+        f"Description=Run heimdall daily at {time_hhmm}\n"
+        f"# {SCHEDULE_MARKER}\n"
+        "\n"
+        "[Timer]\n"
+        f"OnCalendar=*-*-* {time_hhmm}:00\n"
+        "Persistent=true\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+    return {"service": service, "timer": timer}
+
+
+def render_cron_line(time_hhmm: str, csv_path: Path,
+                     python_exe: str, script_path: Path,
+                     dry_run: bool = False) -> str:
+    """Render the cron line for the daily run. Pure."""
+    time_hhmm = _validate_hhmm(time_hhmm)
+    hh, mm = time_hhmm.split(":")
+    argv = [python_exe, str(script_path), str(csv_path)]
+    if dry_run:
+        argv.append("--dry-run")
+    cmd = " ".join(_shell_quote(a) for a in argv)
+    log = "$HOME/.heimdall-cron.log"
+    return (f"{int(mm)} {int(hh)} * * * {cmd} "
+            f">> {log} 2>&1  # {SCHEDULE_MARKER}\n")
+
+
+def render_schtasks_create(time_hhmm: str, csv_path: Path,
+                           python_exe: str, script_path: Path,
+                           dry_run: bool = False) -> list[str]:
+    """Render the `schtasks /Create` argv for Windows. Pure.
+
+    No `cmd /c "... >> log 2>&1"` wrap: schtasks /TR hard-caps the action
+    string at 261 characters and the wrap form blows past that once the
+    venv-python + script + CSV paths are included. Users see daily-run
+    outcome via Task Scheduler's "Last Result" column instead, or by
+    firing the same command from PowerShell to inspect stderr.
+    """
+    time_hhmm = _validate_hhmm(time_hhmm)
+    argv = [python_exe, str(script_path), str(csv_path)]
+    if dry_run:
+        argv.append("--dry-run")
+    action = " ".join(f'"{a}"' if " " in a else a for a in argv)
+    return ["schtasks", "/Create", "/TN", WINDOWS_TASK_NAME,
+            "/TR", action, "/SC", "DAILY", "/ST", time_hhmm,
+            "/RL", "LIMITED", "/F"]
+
+
+# ── Installers ──────────────────────────────────────────────────────────────
+
+def install_systemd_user(time_hhmm: str, csv_path: Path,
+                         dry_run: bool = False) -> int:
+    units = render_systemd_units(time_hhmm, csv_path,
+                                 _python_exe(), _script_path(),
+                                 dry_run=dry_run)
+    unit_dir = _systemd_user_dir()
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    service_path = unit_dir / f"{SYSTEMD_UNIT_NAME}.service"
+    timer_path = unit_dir / f"{SYSTEMD_UNIT_NAME}.timer"
+    service_path.write_text(units["service"])
+    print(f"[schedule] wrote {service_path}", file=sys.stderr)
+    timer_path.write_text(units["timer"])
+    print(f"[schedule] wrote {timer_path}", file=sys.stderr)
+    target = f"{SYSTEMD_UNIT_NAME}.timer"
+    for cmd in (["systemctl", "--user", "daemon-reload"],
+                ["systemctl", "--user", "enable", "--now", target]):
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            print(f"[schedule] '{' '.join(cmd)}' returned {rc}",
+                  file=sys.stderr)
+            return rc
+    print(f"[schedule] enabled and started {target}", file=sys.stderr)
+    print(f"[schedule] status:  systemctl --user status {target}",
+          file=sys.stderr)
+    print(f"[schedule] logs:    journalctl --user -u {target} -f",
+          file=sys.stderr)
+    return 0
+
+
+def uninstall_systemd_user() -> int:
+    unit_dir = _systemd_user_dir()
+    found = False
+    for name in (f"{SYSTEMD_UNIT_NAME}.timer",
+                 f"{SYSTEMD_UNIT_NAME}.service"):
+        unit = unit_dir / name
+        if unit.exists():
+            found = True
+            subprocess.call(["systemctl", "--user", "stop", name],
+                            stderr=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL)
+            subprocess.call(["systemctl", "--user", "disable", name],
+                            stderr=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL)
+            unit.unlink()
+            print(f"[schedule] removed {unit}", file=sys.stderr)
+    if found:
+        subprocess.call(["systemctl", "--user", "daemon-reload"])
+    else:
+        print("[schedule] no heimdall systemd units found", file=sys.stderr)
+    return 0
+
+
+def install_cron(time_hhmm: str, csv_path: Path,
+                 dry_run: bool = False) -> int:
+    if shutil.which("crontab") is None:
+        print("[schedule] crontab not found on PATH", file=sys.stderr)
+        return 1
+    new_line = render_cron_line(time_hhmm, csv_path,
+                                _python_exe(), _script_path(),
+                                dry_run=dry_run)
+    try:
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        current = r.stdout if r.returncode == 0 else ""
+    except FileNotFoundError:
+        return 1
+    cleaned = "\n".join(l for l in current.splitlines()
+                        if SCHEDULE_MARKER not in l)
+    combined = (cleaned.rstrip() + "\n" + new_line) if cleaned.strip() else new_line
+    proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+    proc.communicate(combined)
+    if proc.returncode != 0:
+        print(f"[schedule] crontab write failed (rc={proc.returncode})",
+              file=sys.stderr)
+        return proc.returncode
+    print(f"[schedule] added cron entry (marker: {SCHEDULE_MARKER})",
+          file=sys.stderr)
+    print(f"[schedule] view: crontab -l", file=sys.stderr)
+    print(f"[schedule] log:  tail -f ~/.heimdall-cron.log", file=sys.stderr)
+    return 0
+
+
+def uninstall_cron() -> int:
+    if shutil.which("crontab") is None:
+        return 0
+    try:
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return 0
+        current = r.stdout
+    except FileNotFoundError:
+        return 0
+    cleaned = "\n".join(l for l in current.splitlines()
+                        if SCHEDULE_MARKER not in l)
+    if cleaned == current.rstrip("\n"):
+        print("[schedule] no heimdall cron entries found", file=sys.stderr)
+        return 0
+    proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+    proc.communicate(cleaned)
+    print("[schedule] removed heimdall cron entries", file=sys.stderr)
+    return 0
+
+
+def install_windows_task(time_hhmm: str, csv_path: Path,
+                         dry_run: bool = False) -> int:
+    cmd = render_schtasks_create(time_hhmm, csv_path,
+                                 _python_exe(), _script_path(),
+                                 dry_run=dry_run)
+    rc = subprocess.call(cmd)
+    if rc != 0:
+        return rc
+    print(f"[schedule] created task: {WINDOWS_TASK_NAME}", file=sys.stderr)
+    print(f"[schedule] view:    schtasks /Query /TN {WINDOWS_TASK_NAME}",
+          file=sys.stderr)
+    print(f"[schedule] run now: schtasks /Run /TN {WINDOWS_TASK_NAME}",
+          file=sys.stderr)
+    print(f"[schedule] (Task Scheduler doesn't capture stdout — to see "
+          f"what a run did, fire it from PowerShell directly.)",
+          file=sys.stderr)
+    return 0
+
+
+def uninstall_windows_task() -> int:
+    rc = subprocess.call(["schtasks", "/Delete", "/TN", WINDOWS_TASK_NAME,
+                          "/F"], stderr=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL)
+    if rc == 0:
+        print(f"[schedule] removed scheduled task: {WINDOWS_TASK_NAME}",
+              file=sys.stderr)
+    else:
+        print(f"[schedule] no scheduled task named {WINDOWS_TASK_NAME} found",
+              file=sys.stderr)
+    return 0
+
+
+def cmd_schedule_headless(args) -> int:
+    """Headless --schedule path. Reads time + CSV path + dry-run from args."""
+    if not args.schedule_csv:
+        sys.exit("--schedule needs --schedule-csv PATH (the CSV file to "
+                 "upload daily). Heimdall has no pull-from-source flavour, "
+                 "so the scheduler must point at a file you keep refreshing.")
+    csv_path = Path(args.schedule_csv).resolve()
+    time_hhmm = _validate_hhmm(args.schedule_time or DEFAULT_SCHEDULE_TIME)
+    dry_run = bool(args.schedule_dry_run)
+    if not _key_path().exists() and not os.environ.get("WDGWARS_API_KEY"):
+        sys.exit("--schedule needs a saved WDGoWars API key (run --setup "
+                 "first), or set WDGWARS_API_KEY in the environment the "
+                 "scheduler will run under.")
+    mech = _schedule_mechanism()
+    if mech == "systemd":
+        return install_systemd_user(time_hhmm, csv_path, dry_run=dry_run)
+    if mech == "cron":
+        return install_cron(time_hhmm, csv_path, dry_run=dry_run)
+    if mech == "windows":
+        return install_windows_task(time_hhmm, csv_path, dry_run=dry_run)
+    sys.exit(f"unsupported platform for --schedule: {sys.platform}")
+
+
+def cmd_unschedule() -> int:
+    """Remove every heimdall-managed schedule entry on this platform."""
+    rcs = []
+    if sys.platform == "win32":
+        rcs.append(uninstall_windows_task())
+    else:
+        if _has_systemd():
+            rcs.append(uninstall_systemd_user())
+        rcs.append(uninstall_cron())
+    return 0 if all(rc == 0 for rc in rcs) else 1
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -587,10 +932,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--whoami", action="store_true",
                    help="validate your stored API key by hitting /api/me and "
                         "showing account stats; exits after.")
-    p.add_argument("--api-key", help="WDGoWars API key (or set WDGWARS_API_KEY, "
-                                     "or run --setup once to save it)")
-    p.add_argument("--endpoint", default=DEFAULT_ENDPOINT,
-                   help=f"override upload endpoint (default: {DEFAULT_ENDPOINT})")
+    # --key is the canonical name (matches Muninn + wigle-to-wdgwars).
+    # --api-key is the legacy name; kept as a deprecated alias for one
+    # release. Drop in v0.4 unless the operator extends the deprecation
+    # window. The actual value lands on args.key after the merge below.
+    p.add_argument("--key", help="WDGoWars API key (or set WDGWARS_API_KEY, "
+                                 "or run --setup once to save it)")
+    p.add_argument("--api-key", dest="api_key_legacy",
+                   help=argparse.SUPPRESS)  # deprecated alias for --key
+    # --api-url is the canonical name (matches Muninn). --endpoint is the
+    # legacy name; same deprecation treatment as --api-key.
+    p.add_argument("--api-url", default=None,
+                   help=f"override upload URL (default: {DEFAULT_ENDPOINT})")
+    p.add_argument("--endpoint", dest="endpoint_legacy", default=None,
+                   help=argparse.SUPPRESS)  # deprecated alias for --api-url
     p.add_argument("--dry-run", action="store_true",
                    help="build the HMAC-signed envelope but do not POST")
     p.add_argument("--preview", action="store_true",
@@ -599,11 +954,63 @@ def main(argv: list[str] | None = None) -> int:
                    help="suppress informational banners (errors still print)")
     p.add_argument("--no-version-check", action="store_true",
                    help="skip the daily GitHub release check entirely")
+    # ── Scheduler flags ──
+    p.add_argument("--schedule", action="store_true",
+                   help="install a daily scheduled upload (systemd / cron / "
+                        "schtasks per OS). Pairs with --schedule-csv. "
+                        "Headless with --schedule-time / --schedule-dry-run.")
+    p.add_argument("--unschedule", action="store_true",
+                   help="remove every heimdall-managed scheduled task "
+                        "on this host.")
+    p.add_argument("--schedule-csv", metavar="PATH",
+                   help="path to the CSV that should be uploaded daily. "
+                        "Required for --schedule.")
+    p.add_argument("--schedule-time", metavar="HH:MM",
+                   help=f"24-hour daily run time for --schedule "
+                        f"(default: {DEFAULT_SCHEDULE_TIME})")
+    p.add_argument("--schedule-dry-run", action="store_true",
+                   help="install the schedule with --dry-run baked in. "
+                        "Parses + signs but never POSTs. Re-run --schedule "
+                        "without this flag to go live.")
     args = p.parse_args(argv)
+
+    # ── Deprecated-flag back-compat ──
+    # If the user passed --api-key, hoist it onto args.key (with a warning).
+    # Same for --endpoint -> --api-url. Both old names disappear in v0.4.
+    if args.api_key_legacy is not None:
+        if args.key is None:
+            args.key = args.api_key_legacy
+        elif args.key != args.api_key_legacy:
+            sys.exit("--key and --api-key both given with different values; "
+                     "use --key only (--api-key is deprecated).")
+        if not args.quiet:
+            print("[heimdall] note: --api-key is deprecated, use --key. "
+                  "The old name still works for now but will be removed.",
+                  file=sys.stderr)
+    if args.endpoint_legacy is not None:
+        if args.api_url is None:
+            args.api_url = args.endpoint_legacy
+        elif args.api_url != args.endpoint_legacy:
+            sys.exit("--api-url and --endpoint both given with different "
+                     "values; use --api-url only (--endpoint is deprecated).")
+        if not args.quiet:
+            print("[heimdall] note: --endpoint is deprecated, use --api-url. "
+                  "The old name still works for now but will be removed.",
+                  file=sys.stderr)
+    if args.api_url is None:
+        args.api_url = DEFAULT_ENDPOINT
 
     # --update is a top-level mode, run before anything that needs a key/file.
     if args.update:
         return _run_update()
+
+    # Schedule mutation modes — don't need a key in process but the
+    # installed unit will need one at run-time. cmd_schedule_headless
+    # checks for a saved key and exits early if absent.
+    if args.unschedule:
+        return cmd_unschedule()
+    if args.schedule:
+        return cmd_schedule_headless(args)
 
     # Soft nudge: if a newer release is out, mention it (non-blocking, daily-cached).
     if not args.quiet and not args.no_version_check:
@@ -620,7 +1027,7 @@ def main(argv: list[str] | None = None) -> int:
         save_key(args.save_key)
         return 0
     if args.whoami:
-        key = load_key(args.api_key)
+        key = load_key(args.key)
         if not key:
             print("no API key found, run `python3 heimdall.py --setup` "
                   "for first-time setup", file=sys.stderr)
@@ -630,7 +1037,8 @@ def main(argv: list[str] | None = None) -> int:
     # From here on we need a CSV.
     if args.csv is None:
         p.error("the following arguments are required: csv "
-                "(or use --setup / --save-key / --whoami / --update)")
+                "(or use --setup / --save-key / --whoami / --update / "
+                "--schedule / --unschedule)")
 
     if not args.csv.exists():
         print(f"file not found: {args.csv}", file=sys.stderr)
@@ -647,14 +1055,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(row))
         return 0
 
-    key = load_key(args.api_key)
+    key = load_key(args.key)
     if not key:
-        print("missing API key: pass --api-key, set WDGWARS_API_KEY, or run "
+        print("missing API key: pass --key, set WDGWARS_API_KEY, or run "
               "`python3 heimdall.py --setup` once to save it", file=sys.stderr)
         return 2
 
     rc = 0
-    for status, body in upload(nodes, key, endpoint=args.endpoint, dry_run=args.dry_run):
+    for status, body in upload(nodes, key, endpoint=args.api_url, dry_run=args.dry_run):
         if status == 0:
             print(f"{_INFO()} {body}", file=sys.stderr)
             continue
