@@ -53,6 +53,7 @@ Heimdall is pure stdlib Python (no `pip install` step). You have two ways to gra
 ```bash
 git clone https://github.com/HiroAlleyCat/meshcore-to-wdgwars
 cd meshcore-to-wdgwars
+# direct invocation: Heimdall is pure stdlib, runs without a venv
 python3 heimdall.py examples/sample.csv --preview
 ```
 
@@ -69,6 +70,7 @@ Both install paths work the same way for daily use. `--update` is smart enough t
 ### One-time API-key setup
 
 ```bash
+# direct invocation: Heimdall is pure stdlib, runs without a venv
 python3 heimdall.py --setup
 ```
 
@@ -91,7 +93,7 @@ After setup, you can run uploads with no key flags at all. Windows users can dou
 ### Or just preview
 
 ```bash
-python3 heimdall.py path/to/your_export.csv --preview
+./run.sh path/to/your_export.csv --preview
 ```
 
 Prints the first six normalised rows to stdout as JSON, then exits. No upload, no envelope. Useful for sanity-checking a fresh export.
@@ -102,31 +104,67 @@ Prints the first six normalised rows to stdout as JSON, then exits. No upload, n
 
 ```bash
 # Easiest: after `--setup`, no flags needed.
-python3 heimdall.py path/to/your_export.csv
+./run.sh path/to/your_export.csv
 
 # Or pass the key on the command line each time
-python3 heimdall.py path/to/your_export.csv --api-key YOUR_KEY
+./run.sh path/to/your_export.csv --key YOUR_KEY
 
 # Or set it in the environment
 export WDGWARS_API_KEY=YOUR_KEY
-python3 heimdall.py path/to/your_export.csv
+./run.sh path/to/your_export.csv
 
 # Build the envelope but don't POST (verify everything before going live)
-python3 heimdall.py path/to/your_export.csv --dry-run
+./run.sh path/to/your_export.csv --dry-run
 ```
 
 `--dry-run` builds the full HMAC-signed request (same signature the live upload would send) but does not POST. Useful for confirming the envelope is well-formed before pointing it at the live API.
 
 Records batch in chunks of **1000** per request.
 
-Want to confirm your saved key is good before running a real upload? `python3 heimdall.py --whoami` hits `/api/me` and prints your username + node counts.
+Want to confirm your saved key is good before running a real upload? `./run.sh --whoami` hits `/api/me` and prints your username + node counts.
+
+---
+
+## Running on a schedule
+
+If you keep a refreshed MeshMapper export at a known path (e.g. a nightly RX-log copy), let Heimdall install a daily timer that uploads it for you:
+
+```bash
+# Interactive — picks the right mechanism for your OS (systemd / cron / schtasks)
+./run.sh --schedule --schedule-csv /data/mesh/nightly.csv
+
+# Default time is 03:00 local; override with --schedule-time HH:MM
+./run.sh --schedule --schedule-csv /data/mesh/nightly.csv --schedule-time 04:30
+
+# First install dry-run — parses + signs but never POSTs. Re-run without
+# --schedule-dry-run to go live once you trust the daily cycle.
+./run.sh --schedule --schedule-csv /data/mesh/nightly.csv --schedule-dry-run
+```
+
+Mechanism per OS:
+
+| OS | Mechanism | Where it lives |
+|---|---|---|
+| Linux with systemd | user systemd timer | `~/.config/systemd/user/heimdall.service` + `.timer` |
+| Linux without systemd, macOS | user crontab | `crontab -l` |
+| Windows | scheduled task | `schtasks /Query /TN Heimdall` |
+
+Every artifact carries a `# managed-by-heimdall` marker comment so the uninstaller can find and remove it without touching the rest of your crontab / systemd unit dir / task scheduler.
+
+To remove every Heimdall-managed scheduled task on the host:
+
+```bash
+./run.sh --unschedule
+```
+
+The API key is **never** baked into the unit file / cron line / schtasks action — the saved-on-disk key file is read at run-time instead. Inspecting the installed entry (`systemctl --user cat heimdall.service` or `crontab -l` or `schtasks /Query /TN Heimdall /V`) will never expose your credential.
 
 ---
 
 ## Updating
 
 ```bash
-python3 heimdall.py --update
+./run.sh --update
 ```
 
 - If you cloned the repo, this runs `git pull --ff-only` in the install directory.
@@ -160,59 +198,81 @@ Italicised rows are not yet implemented — they are on the roadmap once sample 
 ## All command-line flags
 
 ```
-python3 heimdall.py [csv] [options]
+./run.sh [csv] [options]
 ```
 
 | Flag | Purpose | Default |
 |---|---|---|
-| `csv` (positional) | Path to the MeshMapper CSV export. Optional with `--setup`, `--save-key`, `--whoami`, `--update`. | (none) |
+| `csv` (positional) | Path to the MeshMapper CSV export. Optional with `--setup`, `--save-key`, `--whoami`, `--update`, `--schedule`, `--unschedule`. | (none) |
 | `--setup` | Interactive first-time setup. Prompts for your WDGoWars API key, validates it against `/api/me`, and saves it to your user config dir. | off |
 | `--save-key KEY` | Non-interactive: save the given API key to the user config dir. Prefer `--setup` for first-time install. | off |
 | `--whoami` | Validate your stored API key by hitting `/api/me` and printing username + node counts. | off |
-| `--api-key KEY` | WDGoWars API key. Overrides the `WDGWARS_API_KEY` env var and the saved key. | env / saved |
+| `--key KEY` | WDGoWars API key. Overrides the `WDGWARS_API_KEY` env var and the saved key. Matches Muninn + wigle-to-wdgwars. | env / saved |
 | `--preview` | Parse the file, print the first six normalised rows as JSON, then exit. No envelope build, no upload. | off |
 | `--dry-run` | Build the full HMAC-signed request envelope (same bytes the live upload would send), print a short summary per chunk, but do **not** POST. | off |
-| `--endpoint URL` | Override the WDGoWars upload endpoint. | `https://wdgwars.pl/api/upload/` |
+| `--api-url URL` | Override the WDGoWars upload URL. Matches Muninn. | `https://wdgwars.pl/api/upload/` |
+| `--schedule` | Install a daily scheduled upload. Pairs with `--schedule-csv PATH`. | off |
+| `--unschedule` | Remove every Heimdall-managed scheduled task on this host. | off |
+| `--schedule-csv PATH` | CSV file to upload daily. **Required** with `--schedule`. | (none) |
+| `--schedule-time HH:MM` | 24-hour daily run time for `--schedule`. | `03:00` |
+| `--schedule-dry-run` | Install the schedule with `--dry-run` baked in. | off |
 | `--update` | Self-update via `git pull` (clone) or raw-GitHub fetch (ZIP install). | off |
 | `--no-version-check` | Skip the daily GitHub release check for this run. | off |
 | `-q`, `--quiet` | Suppress informational banners. Errors still print. | off |
 | `--version` | Print version and exit. | (none) |
 | `-h`, `--help` | Print help and exit. | (none) |
 
+**Deprecated aliases:** `--api-key` (use `--key`) and `--endpoint` (use `--api-url`) still work for now but will be removed in `v0.4`. Both emit a one-line deprecation note on stderr when used.
+
 ### Examples
 
 ```bash
 # One-time setup (saves your API key)
-python3 heimdall.py --setup
+./run.sh --setup
 
 # Sanity-check a fresh export
-python3 heimdall.py my-capture.csv --preview
+./run.sh my-capture.csv --preview
 
 # Build envelope but don't POST (verify HMAC + payload shape)
-python3 heimdall.py my-capture.csv --dry-run
+./run.sh my-capture.csv --dry-run
 
 # Real upload, key already saved by --setup
-python3 heimdall.py my-capture.csv
+./run.sh my-capture.csv
 
 # Real upload, key on command line
-python3 heimdall.py my-capture.csv --api-key YOUR_KEY
+./run.sh my-capture.csv --key YOUR_KEY
 
 # Real upload, key in env (keeps the key out of shell history)
 export WDGWARS_API_KEY=YOUR_KEY
-python3 heimdall.py my-capture.csv
+./run.sh my-capture.csv
 
 # Confirm the saved key is valid
-python3 heimdall.py --whoami
+./run.sh --whoami
 
 # Self-update to latest
-python3 heimdall.py --update
+./run.sh --update
 
 # Point at a self-hosted proxy (see web/serve.py)
-python3 heimdall.py my-capture.csv \
-  --endpoint http://127.0.0.1:8765/api/upload/
+./run.sh my-capture.csv \
+  --api-url http://127.0.0.1:8765/api/upload/
 ```
 
 Records batch in chunks of **1000** per request.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `ModuleNotFoundError: No module named 'gungnir'` | Ran `python3 heimdall.py ...` directly instead of `./run.sh` — system Python doesn't see the venv. | Use `./run.sh ...` (it picks `.venv/bin/python` automatically) or activate the venv yourself: `source .venv/bin/activate`. |
+| `[heimdall] note: --api-key is deprecated, use --key.` | You're on a fresh `v0.3.0+` with old shell history / docs. | Rename the flag — both still work today, but `--api-key` disappears in `v0.4`. |
+| `--schedule needs --schedule-csv PATH` | The scheduler needs a fixed CSV file path to upload daily. | Pick a path you keep refreshing (your nightly MeshMapper export) and pass it: `./run.sh --schedule --schedule-csv /path/to/file.csv`. |
+| `--schedule needs a saved WDGoWars API key` | The installed timer reads the saved key at run-time; you haven't saved one yet. | Run `./run.sh --setup` first, then re-run `--schedule`. |
+| Daily upload runs but nothing appears on WDGoWars | The schedule was installed with `--schedule-dry-run`. | Re-run `--schedule` without `--schedule-dry-run` to go live. |
+| Want to inspect the installed daily job | Per-OS check: | `systemctl --user cat heimdall.service` (systemd) / `crontab -l` (cron) / `schtasks /Query /TN Heimdall /V` (Windows). |
+| `schtasks: Value for '/TR' option cannot be more than 261 character(s)` | Your install path + CSV path exceed the schtasks /TR limit. | Move the install to a shorter path (e.g. `C:\heimdall\` instead of nested user paths). |
+| Dry-run says HEALTHY but real upload returns `401` | Saved key was rotated or revoked. | Re-run `./run.sh --setup` to save the current key, then `./run.sh --whoami` to verify. |
 
 ---
 

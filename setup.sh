@@ -48,5 +48,7 @@ echo "[4/4] Saving your WDGoWars API key..."
 "$VENV_PY" heimdall.py --setup
 
 echo
-read -n 1 -s -r -p "Press any key to close..."
-echo
+if [ -t 0 ]; then
+    read -n 1 -s -r -p "Press any key to close..."
+    echo
+fi

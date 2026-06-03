@@ -14,5 +14,7 @@ else
   "$PY" heimdall.py "$@"
 fi
 echo
-read -n 1 -s -r -p "Press any key to close..."
-echo
+if [ -t 0 ]; then
+    read -n 1 -s -r -p "Press any key to close..."
+    echo
+fi

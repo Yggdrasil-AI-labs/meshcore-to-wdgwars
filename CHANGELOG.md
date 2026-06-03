@@ -4,6 +4,71 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-06-03 - Family alignment: scheduler + naming + safety nets
+
+Largest end-user-visible alignment of the 2026-06-03 feeder-family audit
+sweep. Brings Heimdall to feature parity with Muninn + wigle-to-wdgwars
+for the install / schedule / daily-run flow, and aligns the flag names
+so muscle memory transfers across the family.
+
+### Added
+
+- `--schedule` / `--unschedule` / `--schedule-csv PATH` /
+  `--schedule-time HH:MM` / `--schedule-dry-run`. Installs the right
+  artifact per OS: user systemd timer on Linux-with-systemd, user
+  crontab on macOS / Linux-without-systemd, scheduled task on
+  Windows. Default time `03:00`. Every artifact carries a
+  `# managed-by-heimdall` marker so the uninstaller can find and
+  remove it cleanly. The API key is **never** baked into the unit
+  file / cron line / schtasks action — the saved-on-disk key file
+  is read at run-time instead.
+- `--key` flag (canonical name, matches Muninn + wigle).
+- `--api-url` flag (canonical name, matches Muninn).
+- `scripts/smoke.sh` — pre-release smoke (README linter + AST/import
+  + offline tests + `--version`/`--help` + Linux/systemd unit-write
+  roundtrip + no-key-leak assertion).
+- `scripts/check_readme_examples.py` — README linter ported from
+  Muninn / wigle. Auto-detects the entrypoint script. Catches
+  `python3 heimdall.py ...` examples that drift outside venv-teaching
+  blocks. Heimdall is stdlib-only and works without a venv, so two
+  intentional bootstrap examples are annotated
+  `# direct invocation` to keep the linter quiet.
+- README `## Running on a schedule` section with per-OS mechanism
+  table.
+- README `## Troubleshooting` section.
+- `tests/test_scheduler.py` — 17 new tests covering the pure
+  renderers (`render_systemd_units` / `render_cron_line` /
+  `render_schtasks_create`), HH:MM validation, the schedule mechanism
+  selector, and a no-key-leak assertion that the renderers never
+  bake credentials into the artifact.
+
+### Changed
+
+- `_prompt_yes_no` now emits an explicit newline after consuming a
+  piped-stdin answer. Interactive TTY input gets one from the
+  terminal; piped input doesn't, which used to glue the next
+  section header onto the prompt line in scripted runs.
+- `setup.sh` / `run.sh` / `update.sh` now `[ -t 0 ]`-gate the
+  trailing `Press any key to close...`. Piped / non-TTY invocations
+  used to hang indefinitely on that line.
+- README code-block examples rewritten from `python3 heimdall.py
+  ...` to `./run.sh ...` (the venv-aware shim).
+
+### Deprecated
+
+- `--api-key` flag: replaced by `--key`. The old name still works
+  and now emits a one-line deprecation note on stderr. Will be
+  removed in `v0.4`.
+- `--endpoint` flag: replaced by `--api-url`. Same one-release
+  deprecation treatment.
+
+### Not changed (out of audit scope)
+
+- gungnir extraction: Heimdall is still pure stdlib with an inlined
+  HMAC envelope. The `v0.2-gungnir` branch from earlier never landed
+  on `main`. Architectural refactor, not alignment work — filed as
+  a tracked note for a separate session.
+
 ## [0.2.2] - 2026-06-01 - setup.sh: PEP 668 / Bookworm fix
 
 `setup.sh`, `run.sh`, and `update.sh` now install Heimdall into a
