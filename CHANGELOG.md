@@ -4,6 +4,36 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-06-05 - Structured 413 message for the 15 MB upload cap
+
+LOCOSP rolled out a temporary 15 MB body cap on every wdgwars.pl upload
+endpoint on 2026-06-05 with a structured 413 envelope
+(`{error: payload-too-large, max_bytes, received, ...}`). Heimdall does
+not use gungnir (its HMAC transport is pure-stdlib local code), so the
+gungnir v0.1.3 upgrade does not reach it. This release patches the same
+behavior into Heimdall directly: cosmetic log-message change only, no
+control-flow change.
+
+Mesh-node payloads are kilobytes per cycle, well under the 15 MB cap,
+so this is defensive insurance. If the 413 does fire, the error line
+now names the cap and shows `max_bytes` + `received` instead of a
+generic "rejected by wdgwars.pl (HTTP 413): payload-too-large".
+
+### Changed
+
+- Upload rejection branch in `main()` checks for the
+  `payload-too-large` envelope shape and prints a structured line.
+  Other 4xx / 5xx rejections keep the generic format.
+
+### Not changed
+
+- Upload control flow: 413 still returns `rc=1` and skips the batch,
+  same as any other rejection. There is no auto-retry blast.
+- No new tests: the 413 branch is print-only and the existing test
+  suite has no upload-side coverage to extend. Sibling tools
+  (gungnir v0.1.3, wigle-to-wdgwars v1.4.0) carry the contract tests
+  for the envelope shape.
+
 ## [0.3.0] - 2026-06-03 - Family alignment: scheduler + naming + safety nets
 
 Largest end-user-visible alignment of the 2026-06-03 feeder-family audit

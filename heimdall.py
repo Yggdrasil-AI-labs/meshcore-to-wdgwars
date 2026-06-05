@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
@@ -1081,8 +1081,25 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{_OK()} accepted by wdgwars.pl (HTTP {status}): "
                       f"{_scrub(body[:200], key)}", file=sys.stderr)
         else:
-            print(f"{_FAIL()} rejected by wdgwars.pl (HTTP {status}): "
-                  f"{_scrub(body[:200], key)}", file=sys.stderr)
+            data: dict = {}
+            try:
+                data = json.loads(body)
+            except Exception:
+                pass
+            if status == 413 and isinstance(data, dict) and data.get("error") == "payload-too-large":
+                max_b = data.get("max_bytes")
+                recv = data.get("received")
+                print(
+                    f"{_FAIL()} 413 payload-too-large from wdgwars.pl "
+                    f"(max_bytes={max_b} received={recv}). LOCOSP added a "
+                    f"15 MB upload cap on 2026-06-05; mesh-node payloads are "
+                    f"normally well under it, so this is unexpected. Drop the "
+                    f"batch size or wait for the next cycle.",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"{_FAIL()} rejected by wdgwars.pl (HTTP {status}): "
+                      f"{_scrub(body[:200], key)}", file=sys.stderr)
             rc = 1
     return rc
 
