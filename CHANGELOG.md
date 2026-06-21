@@ -4,6 +4,35 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - CI quality gates + security review
+
+Tooling and CI only — no change to `heimdall.py` behavior, so no version bump.
+
+Brings Heimdall onto the same gated CI pipeline as the sibling
+adsb-to-wdgwars (Muninn) and wigle-to-wdgwars repos: pytest + coverage →
+SonarCloud quality gate → Snyk dependency scan → gated release-artifact build.
+The `sonarcloud` / `snyk` jobs stay red until the repo is imported into
+SonarCloud and the `SONAR_TOKEN` / `SNYK_TOKEN` Actions secrets are added (see
+CI.md); the test and coverage stage is independent and passes on its own.
+(Heimdall is pure stdlib, so the Snyk stage is effectively a no-op — kept for
+family parity.)
+
+A review against the SonarCloud SAST finding classes found nothing to
+remediate — the scheduler arguments (including the CSV path) are shell-quoted,
+the API key never reaches the command line, and `save_key` refuses symlinks
+and uses mode 600. See SECURITY-FINDINGS.md.
+
+### Added
+
+- `.github/workflows/ci-quality-gates.yml` — gated quality + security pipeline.
+- `sonar-project.properties`, `requirements-dev.txt`, `pyproject.toml`
+  (pytest + coverage config with a regression floor), and `CI.md`.
+- `tests/test_security.py` — regression tests locking in the existing
+  defenses (shell-quoting incl. the CSV path, no-key-in-argv, safe key-file
+  writes).
+- `SECURITY-FINDINGS.md` — the security review write-up; pointer added to
+  `SECURITY.md`.
+
 ## [0.3.1] - 2026-06-05 - Structured 413 message for the 15 MB upload cap
 
 LOCOSP rolled out a temporary 15 MB body cap on every wdgwars.pl upload

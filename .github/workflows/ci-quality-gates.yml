@@ -1,0 +1,140 @@
+name: ci-quality-gates
+
+# Gated pipeline: build/test -> scan (SonarCloud + Snyk) -> build artifact.
+# The artifact stage only runs if every gate passes. The existing tests.yml
+# workflow stays as the functional test + smoke suite; this one adds the
+# code-quality and security gates on top. Mirrors the pipeline shipped in the
+# sibling adsb-to-wdgwars (Muninn) and wigle-to-wdgwars repos.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Stage 1: build and test, produce coverage.xml.
+  test:
+    name: Test and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so SonarCloud can attribute new code and blame.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # Heimdall has no runtime deps (pure stdlib); requirements-dev.txt
+        # brings pytest + pytest-cov for the coverage report.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run pytest with coverage
+        # CI runners never hold a real WDGoWars key, so the live-key safety
+        # guard is a no-op here; the env var makes that intent explicit.
+        env:
+          HEIMDALL_TEST_ALLOW_LIVE_KEY: "1"
+        run: pytest --cov=heimdall --cov-report=xml --cov-report=term-missing --cov-branch
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 7
+
+  # Stage 2a: SonarCloud static analysis + quality gate (reads coverage.xml).
+  sonarcloud:
+    name: SonarCloud quality gate
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml
+
+      - name: SonarCloud scan and quality gate
+        # sonar.qualitygate.wait=true (in sonar-project.properties) makes this
+        # step fail the job when the gate fails, instead of only reporting it.
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          # EU region instance. US region would be https://sonarqube.us.
+          SONAR_HOST_URL: https://sonarcloud.io
+
+  # Stage 2b: Snyk software composition analysis on the dependency tree.
+  # Heimdall is pure stdlib, so this is effectively a no-op today; it is kept
+  # for family parity and to catch the day a runtime dependency is pinned.
+  snyk:
+    name: Snyk dependency scan
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Snyk Open Source scan (fail on high or critical)
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=requirements.txt --severity-threshold=high
+
+      - name: Snyk monitor (track shipped deps for new CVEs)
+        # Keeps Snyk watching the project after the run, so a CVE disclosed
+        # against a dependency already on main raises an alert. Main only,
+        # and non-blocking: monitoring is reporting, not a gate.
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: monitor
+          args: --file=requirements.txt
+
+  # Stage 3: build the release bundle. Only runs if both gates passed.
+  package:
+    name: Build release artifact
+    needs: [sonarcloud, snyk]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage release bundle
+        run: |
+          mkdir -p dist
+          cp heimdall.py requirements.txt README.md LICENSE dist/
+          tar -czf heimdall-bundle.tar.gz -C dist .
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: heimdall-bundle
+          path: heimdall-bundle.tar.gz
+          retention-days: 14
