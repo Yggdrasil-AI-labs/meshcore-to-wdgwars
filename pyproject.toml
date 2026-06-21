@@ -1,0 +1,25 @@
+# Tooling config only. This single-file CLI is not packaged/installed as a
+# distribution, so there is intentionally no [build-system] table here.
+# pip install -r requirements.txt remains the install path.
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.coverage.run]
+branch = true
+source = ["heimdall"]
+omit = [
+    "tests/*",
+    "scripts/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+# Regression floor, set just below the measured baseline (about 20 percent
+# line+branch coverage on heimdall.py as of this commit). The build fails if
+# coverage drops below this. Raise it as tests are added; it is a ratchet,
+# not a target. The real quality enforcement is the SonarCloud
+# Clean-as-You-Code gate on new code (see sonar-project.properties).
+fail_under = 18
