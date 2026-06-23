@@ -97,7 +97,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Detect runtime dependencies
+        # Snyk errors ("empty manifest", SNYK-OS-0012) on a dependency-free
+        # requirements.txt, so only scan when a real (non-comment, non-blank)
+        # line is present. Pure stdlib today => scan is skipped and the job
+        # passes; the day a runtime dep is pinned the scan activates itself.
+        id: deps
+        run: |
+          if grep -qvE '^[[:space:]]*(#.*)?$' requirements.txt; then
+            echo "has_deps=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_deps=false" >> "$GITHUB_OUTPUT"
+            echo "requirements.txt declares no runtime dependencies; skipping Snyk scan (stdlib-only)."
+          fi
+
       - name: Snyk Open Source scan (fail on high or critical)
+        if: steps.deps.outputs.has_deps == 'true'
         uses: snyk/actions/python@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -108,7 +123,7 @@ jobs:
         # Keeps Snyk watching the project after the run, so a CVE disclosed
         # against a dependency already on main raises an alert. Main only,
         # and non-blocking: monitoring is reporting, not a gate.
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.deps.outputs.has_deps == 'true'
         continue-on-error: true
         uses: snyk/actions/python@master
         env:
