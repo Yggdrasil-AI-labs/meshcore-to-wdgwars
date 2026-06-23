@@ -3,14 +3,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/HiroAlleyCat/meshcore-to-wdgwars/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/HiroAlleyCat/meshcore-to-wdgwars?color=b08850&label=release"></a>
+  <a href="https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/actions/workflows/ci-quality-gates.yml"><img alt="CI" src="https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/actions/workflows/ci-quality-gates.yml/badge.svg"></a>
+  <a href="https://sonarcloud.io/dashboard?id=Yggdrasil-AI-labs_meshcore-to-wdgwars"><img alt="Quality gate" src="https://sonarcloud.io/api/project_badges/measure?project=Yggdrasil-AI-labs_meshcore-to-wdgwars&metric=alert_status"></a>
+  <a href="https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Yggdrasil-AI-labs/meshcore-to-wdgwars?color=b08850&label=release"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-b08850.svg"></a>
-  <a href="https://github.com/HiroAlleyCat/meshcore-to-wdgwars/blob/main/SECURITY.md"><img alt="Security" src="https://img.shields.io/badge/security-threat%20model-b08850.svg"></a>
+  <a href="https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/blob/main/SECURITY.md"><img alt="Security" src="https://img.shields.io/badge/security-threat%20model-b08850.svg"></a>
 </p>
 
 # Heimdall
 
-Convert **MeshMapper** "Logs → Copy CSV" exports (and other Meshcore LoRa capture formats, over time) to WDGoWars-compatible JSON and optionally upload them. Sibling tool to [adsb-to-wdgwars](https://github.com/HiroAlleyCat/adsb-to-wdgwars) (Muninn); same HMAC envelope, same `/api/upload/` endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills `meshcore_nodes`.
+Convert **MeshMapper** "Logs → Copy CSV" exports (and other Meshcore LoRa capture formats, over time) to WDGoWars-compatible JSON and optionally upload them. Sibling tool to [adsb-to-wdgwars](https://github.com/Yggdrasil-AI-labs/adsb-to-wdgwars) (Muninn); same HMAC envelope, same `/api/upload/` endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills `meshcore_nodes`.
 
 **Scope:** Heimdall is for **Meshcore LoRa observations from your own captures**. The WDGoWars mesh channel is specifically for Meshcore (LoRa, sub-GHz). Other 802.15.4 traffic — Zigbee, Thread, generic mesh-sounding protocols — does not belong here and will not be accepted upstream. If your data came from a real Meshcore receiver (MeshMapper app, T-Beam running Meshcore Companion, Cardputer ADV + LoRa cap, Heltec V3, etc.), you're in the right place.
 
@@ -18,10 +20,10 @@ Convert **MeshMapper** "Logs → Copy CSV" exports (and other Meshcore LoRa capt
 
 Sibling repos in the WDGoWars feeder family:
 
-- [Muninn](https://github.com/HiroAlleyCat/adsb-to-wdgwars) — ADS-B feeder
-- [wigle-to-wdgwars](https://github.com/HiroAlleyCat/wigle-to-wdgwars) — WiGLE Wi-Fi/BLE feeder
-- [gungnir](https://github.com/HiroAlleyCat/gungnir) — shared HMAC transport library
-- [wdgwars-api-tester](https://github.com/HiroAlleyCat/wdgwars-api-tester) — API surface probe
+- [Muninn](https://github.com/Yggdrasil-AI-labs/adsb-to-wdgwars) — ADS-B feeder
+- [wigle-to-wdgwars](https://github.com/Yggdrasil-AI-labs/wigle-to-wdgwars) — WiGLE Wi-Fi/BLE feeder
+- [gungnir](https://github.com/Yggdrasil-AI-labs/gungnir) — shared HMAC transport library
+- [wdgwars-api-tester](https://github.com/Yggdrasil-AI-labs/wdgwars-api-tester) — API surface probe
 
 ---
 
@@ -51,7 +53,7 @@ Heimdall is pure stdlib Python (no `pip install` step). You have two ways to gra
 ### Option A: git clone (recommended if you have git)
 
 ```bash
-git clone https://github.com/HiroAlleyCat/meshcore-to-wdgwars
+git clone https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars
 cd meshcore-to-wdgwars
 # direct invocation: Heimdall is pure stdlib, runs without a venv
 python3 heimdall.py examples/sample.csv --preview
@@ -61,7 +63,7 @@ python3 heimdall.py examples/sample.csv --preview
 
 ### Option B: ZIP download (no git required)
 
-1. On the [GitHub repo page](https://github.com/HiroAlleyCat/meshcore-to-wdgwars), click the green **Code** button, then **Download ZIP**.
+1. On the [GitHub repo page](https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars), click the green **Code** button, then **Download ZIP**.
 2. Unzip somewhere convenient.
 3. Open a terminal in the unzipped folder and run `python3 heimdall.py examples/sample.csv --preview`.
 
@@ -191,7 +193,7 @@ Heimdall also does a quiet daily check against the GitHub releases API. If a new
 | _Raw MQTT capture_ | _Planned_ | `mosquitto_sub` against a Meshcore broker |
 | _Cardputer ADV LoRa cap log_ | _Planned_ | M5Stack Cardputer Advanced with LoRa module |
 
-Italicised rows are not yet implemented — they are on the roadmap once sample data lands. **Have a real capture you can share? See the pinned ["Wanted: real-world Meshcore capture samples"](https://github.com/HiroAlleyCat/meshcore-to-wdgwars/issues/1) issue for what we're looking for and how to scrub before sending.**
+Italicised rows are not yet implemented — they are on the roadmap once sample data lands. **Have a real capture you can share? See the pinned ["Wanted: real-world Meshcore capture samples"](https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/issues/1) issue for what we're looking for and how to scrub before sending.**
 
 ---
 
@@ -314,14 +316,14 @@ The target per-record schema is `timestamp, node_id, type, name, lat, lon, rssi,
 - Capture files **never leave your machine** until you explicitly run an upload command without `--dry-run`. Parsing, normalising, and envelope-building all happen locally.
 - The API key is read from `--api-key`, then `$WDGWARS_API_KEY`, then the saved key file. When `--setup` (or `--save-key`) writes the file, it's `chmod 0600` on Unix and lives under the per-user `%APPDATA%` on Windows.
 - The bundled `examples/sample.csv` is a **scrubbed** export with `lat=0, lon=0` for every row, so it cannot accidentally produce a real upload (the upstream ingest rejects `0,0` GPS).
-- The daily version check hits `https://api.github.com/repos/HiroAlleyCat/meshcore-to-wdgwars/releases/latest` with a `heimdall/<version>` User-Agent, caches the answer for 24h, and sends nothing about you or your data. Disable per-run with `--no-version-check`, or silence globally with `--quiet`.
+- The daily version check hits `https://api.github.com/repos/Yggdrasil-AI-labs/meshcore-to-wdgwars/releases/latest` with a `heimdall/<version>` User-Agent, caches the answer for 24h, and sends nothing about you or your data. Disable per-run with `--no-version-check`, or silence globally with `--quiet`.
 - No telemetry, no analytics. The only outbound traffic is to the WDGoWars upload endpoint (when you explicitly invoke an upload) and the GitHub release check (cached daily, opt-out via `--no-version-check`).
 
 ---
 
 ## Credits
 
-- **Muninn** ([adsb-to-wdgwars](https://github.com/HiroAlleyCat/adsb-to-wdgwars)) — parent pattern. HMAC envelope, three-deploy-mode design, Pyodide web flavour all originate there.
+- **Muninn** ([adsb-to-wdgwars](https://github.com/Yggdrasil-AI-labs/adsb-to-wdgwars)) — parent pattern. HMAC envelope, three-deploy-mode design, Pyodide web flavour all originate there.
 - **FusedStamen** — surfaced the WDGoWars mesh ingest target schema and suggested the MeshMapper CSV bridge angle.
 - **Wild!Radio** — supplied the MeshMapper RX-log sample used to wire the field map.
 - **MeshMapper** ([wiki](https://wiki.meshmapper.net/)) — upstream Meshcore visualisation platform whose CSV export is Heimdall's first supported input.
@@ -336,5 +338,5 @@ MIT — see [LICENSE](LICENSE).
 
 ## Related
 
-- [adsb-to-wdgwars](https://github.com/HiroAlleyCat/adsb-to-wdgwars) — Muninn, the aircraft sibling.
+- [adsb-to-wdgwars](https://github.com/Yggdrasil-AI-labs/adsb-to-wdgwars) — Muninn, the aircraft sibling.
 - [WDGoWars](https://wdgwars.pl) — the wardriving game these tools feed.
