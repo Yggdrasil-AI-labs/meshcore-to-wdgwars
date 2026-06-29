@@ -92,6 +92,14 @@ def main():
     ProxyHandler.upstream_url = args.upstream
 
     web_dir = Path(__file__).resolve().parent
+    # ponytail: keep the served parser current by copying repo-root heimdall.py into
+    # web/ on startup (mirrors CI pages.yml). Only when the root copy exists, so a
+    # standalone web/ bundle that ships its own heimdall.py still serves.
+    # Upgrade: drop this if web/ ever imports heimdall as an installed package.
+    root_heimdall = web_dir.parent / "heimdall.py"
+    if root_heimdall.is_file():
+        import shutil
+        shutil.copyfile(root_heimdall, web_dir / "heimdall.py")
     import os
     os.chdir(web_dir)
 
