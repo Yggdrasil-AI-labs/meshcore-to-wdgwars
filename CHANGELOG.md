@@ -4,6 +4,44 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - Real MeshMapper formats: multi-section CSV + offline JSON
+
+First release driven by real-world capture data (issue #1 baseline,
+contributed by @nicolasrata, 2026-06-27). The parser was written against an
+assumed flat "Copy CSV" shape; a real MeshMapper export is a multi-section
+file and the offline capture is JSON. The old parser returned **zero** nodes
+on both.
+
+### Added
+
+- Multi-section MeshMapper CSV parsing: `--- TX Log ---`, `--- RX Log ---`,
+  `--- DISC Log ---` blocks, each with its own header. The heard nodes are
+  packed into a trailing `events` (TX) / `nodes` (DISC) column as
+  `ID(snr)` / `ID(R)(snr)` tokens; one record is emitted per heard node.
+- MeshCore offline ping-log JSON parsing (`pings[]` of `DISC` / `RX`).
+  `DISC` pings carry full telemetry including real `local_rssi` + `local_snr`;
+  `RX` pings carry a `heard_repeats` SNR token.
+- `parse_file()` format dispatch (extension first, then content sniff) and a
+  matching `parse_offline_json()` / `parse_meshmapper_text()` API. The CLI and
+  the web dropzone both accept CSV or JSON now.
+- Scrubbed fixtures: `examples/meshmapper-sections.csv`,
+  `examples/offline-pings.json`. Tests covering both new formats.
+
+### Changed
+
+- Flat single-section "Copy CSV" exports still parse exactly as before
+  (`examples/sample.csv` is unchanged) — the section logic only engages when
+  `--- X Log ---` markers are present.
+- Web (Pyodide) parser brought to parser parity with the root module and to
+  v0.4.0; its dropzone calls `parse_file` and reports the detected format.
+
+### Known limitation
+
+- CSV `TX`/`RX`/`DISC` sections and JSON `RX` pings log SNR + receiver noise
+  floor but no per-node RSSI, so those records carry `rssi: null`. Only
+  offline-JSON `DISC` pings have a real RSSI. Node-type markers other than
+  `(R)` (repeater) are normalised to the default pending a confirmed sample.
+
 ## [Unreleased] - CI quality gates + security review
 
 Tooling and CI only — no change to `heimdall.py` behavior, so no version bump.

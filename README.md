@@ -188,10 +188,14 @@ Heimdall also does a quiet daily check against the GitHub releases API. If a new
 
 | Format | Detection | Source |
 |---|---|---|
-| **MeshMapper "Copy CSV"** | Header row `timestamp,repeater_id,snr,rssi,...` | MeshMapper app, RX log export |
+| **MeshMapper flat "Copy CSV"** | Single header row `timestamp,repeater_id,snr,rssi,...` | MeshMapper app, RX log export |
+| **MeshMapper multi-section CSV** | `--- TX/RX/DISC Log ---` marker blocks, each with its own header | MeshMapper full log export |
+| **MeshCore offline ping-log JSON** | `.json` with a top-level `pings[]` array (`DISC` / `RX` pings) | meshcore-ha / MeshCore offline capture |
 | _Meshcore Companion serial dump_ | _Planned_ | T-Beam / Heltec / Wio Tracker via USB serial |
 | _Raw MQTT capture_ | _Planned_ | `mosquitto_sub` against a Meshcore broker |
 | _Cardputer ADV LoRa cap log_ | _Planned_ | M5Stack Cardputer Advanced with LoRa module |
+
+Format is auto-detected (by extension, then by content sniff). One `DISC`/`RX`/`TX` observation becomes one node record. **Note:** the CSV `TX`/`RX`/`DISC` sections log SNR and the receiver's noise floor but no per-node RSSI, so those records carry `rssi: null`; the offline-JSON `DISC` pings include real `local_rssi`. See [`examples/`](examples/) for a scrubbed sample of each format.
 
 Italicised rows are not yet implemented — they are on the roadmap once sample data lands. **Have a real capture you can share? See the pinned ["Wanted: real-world Meshcore capture samples"](https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/issues/1) issue for what we're looking for and how to scrub before sending.**
 

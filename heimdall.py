@@ -18,10 +18,12 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import datetime
 import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import shutil
 import ssl
@@ -34,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
@@ -54,6 +56,78 @@ MESHMAPPER_RX_HEADERS = (
 )
 
 DEFAULT_NODE_TYPE = "repeater"
+
+# A real MeshMapper export is a multi-section file. Each block starts with a
+# marker line like "--- DISC Log ---" and carries its own header row:
+#
+#   --- TX Log ---
+#   timestamp,latitude,longitude,power,events
+#   2026-06-27T11:37:20.859937,0.0,0.0,0.6,0CE8(-0.25)
+#
+#   --- DISC Log ---
+#   timestamp,latitude,longitude,noisefloor,node_count,nodes
+#   2026-06-27T11:36:48.792735,0.0,0.0,-99,2,910E(R)(-6.00),0CE8(R)(1.25)
+#
+# A flat single-section file (the legacy "Logs -> Copy CSV" RX export) has no
+# markers; we treat the whole file as one unnamed section so those keep
+# parsing exactly as before.
+_SECTION_RE = re.compile(r"^---\s*(.+?)\s+Log\s*---\s*$", re.IGNORECASE)
+
+# Columns that pack a list of heard nodes into a single (trailing) field:
+# DISC uses "nodes", TX uses "events". The MeshCore offline-JSON RX pings use
+# "heard_repeats" with the same token grammar.
+_PACKED_NODE_COLUMNS = ("nodes", "events", "heard_repeats")
+
+# One packed node token:
+#   DISC: 910E(R)(-6.00)  -> id=910E, marker=R, snr=-6.00
+#   TX:   0CE8(-0.25)     -> id=0CE8, marker=None, snr=-0.25
+_NODE_TOKEN_RE = re.compile(
+    r"^([0-9A-Fa-f]{2,})"          # node id (variable-width hex)
+    r"(?:\(([A-Za-z])\))?"          # optional single-letter type marker, e.g. (R)
+    r"\(([-+]?\d+(?:\.\d+)?)\)$"     # (snr) in parentheses
+)
+
+# Node-type markers seen in real exports. Only "R" (repeater) is confirmed
+# from the 2026-06-27 baseline; other markers (companion/client, room server)
+# are normalised to the default until a real sample pins their letters down.
+# Do not guess at letters we have not actually seen.
+_NODE_TYPE_MARKERS = {"R": "repeater"}
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _node_token_to_record(token: str, timestamp: str,
+                          lat: float, lon: float) -> dict[str, Any] | None:
+    """Parse one ID(snr) / ID(R)(snr) token into a meshcore record.
+
+    rssi is None: TX/DISC/RX packed tokens carry SNR but no per-node RSSI
+    (the section only logs the receiver's noise floor, not a signal level).
+    Returns None for tokens that don't match the grammar.
+    """
+    token = token.strip()
+    if not token:
+        return None
+    m = _NODE_TOKEN_RE.match(token)
+    if not m:
+        return None
+    node_id, marker, snr_s = m.group(1), m.group(2), m.group(3)
+    node_type = (_NODE_TYPE_MARKERS.get(marker.upper(), DEFAULT_NODE_TYPE)
+                 if marker else DEFAULT_NODE_TYPE)
+    return {
+        "timestamp": timestamp,
+        "node_id": node_id,
+        "type": node_type,
+        "name": "",
+        "lat": lat,
+        "lon": lon,
+        "rssi": None,
+        "snr": float(snr_s),
+    }
 
 # Explicit SSL context. urllib defaults to system trust + full cert verification
 # since Python 3.4.3 (PEP 476); being explicit just makes that obvious in review.
@@ -320,15 +394,174 @@ def _normalise_meshmapper_row(row: dict[str, str]) -> dict[str, Any] | None:
     }
 
 
+def _split_sections(lines: list[str]) -> list[tuple[str | None, list[str]]]:
+    """Split a MeshMapper export into (section_name, content_lines) blocks.
+
+    A flat file with no "--- X Log ---" markers yields a single
+    (None, all_non_blank_lines) block, so legacy exports parse unchanged.
+    Section names are upper-cased ("TX", "RX", "DISC").
+    """
+    sections: list[tuple[str | None, list[str]]] = []
+    name: str | None = None
+    block: list[str] = []
+    for line in lines:
+        m = _SECTION_RE.match(line.strip())
+        if m:
+            if block:
+                sections.append((name, block))
+            name = m.group(1).strip().upper()
+            block = []
+            continue
+        if line.strip():
+            block.append(line)
+    if block:
+        sections.append((name, block))
+    return sections
+
+
+def _parse_packed_section(cols: list[str], packed_idx: int,
+                          data_lines: list[str]) -> list[dict[str, Any]]:
+    """Parse a TX/DISC/RX section whose heard nodes are packed into a trailing
+    column. Everything from `packed_idx` onward is treated as node tokens,
+    because that column holds a comma-separated, unquoted token list that
+    csv.reader splits into multiple trailing fields."""
+    lower = [c.lower() for c in cols]
+    ts_i = lower.index("timestamp") if "timestamp" in lower else 0
+    lat_i = lower.index("latitude") if "latitude" in lower else None
+    lon_i = lower.index("longitude") if "longitude" in lower else None
+    out: list[dict[str, Any]] = []
+    for raw in csv.reader(data_lines):
+        if not raw or ts_i >= len(raw) or not raw[ts_i].strip():
+            continue
+        ts = raw[ts_i].strip()
+        lat = _safe_float(raw[lat_i]) if lat_i is not None and lat_i < len(raw) else 0.0
+        lon = _safe_float(raw[lon_i]) if lon_i is not None and lon_i < len(raw) else 0.0
+        for tok in raw[packed_idx:]:
+            rec = _node_token_to_record(tok, ts, lat, lon)
+            if rec is not None:
+                out.append(rec)
+    return out
+
+
+def _parse_section(block: list[str]) -> list[dict[str, Any]]:
+    """Parse one section (header line + data lines) to meshcore records."""
+    if not block:
+        return []
+    header = next(csv.reader([block[0]]))
+    cols = [c.strip() for c in header]
+    lower = [c.lower() for c in cols]
+    for key in _PACKED_NODE_COLUMNS:
+        if key in lower:
+            return _parse_packed_section(cols, lower.index(key), block[1:])
+    # Flat RX section (legacy "Copy CSV" shape): map via the row normaliser.
+    out: list[dict[str, Any]] = []
+    for row in csv.DictReader(block):
+        norm = _normalise_meshmapper_row(row)
+        if norm is not None:
+            out.append(norm)
+    return out
+
+
+def parse_meshmapper_text(text: str) -> list[dict[str, Any]]:
+    """Parse MeshMapper CSV text (flat or multi-section) to meshcore records."""
+    records: list[dict[str, Any]] = []
+    for _name, block in _split_sections(text.splitlines()):
+        records.extend(_parse_section(block))
+    return records
+
+
 def parse_meshmapper_csv(path: Path) -> list[dict[str, Any]]:
-    with path.open(newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        records = []
-        for row in reader:
-            norm = _normalise_meshmapper_row(row)
-            if norm is not None:
-                records.append(norm)
-        return records
+    return parse_meshmapper_text(path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# MeshCore offline ping-log JSON parsing
+# ---------------------------------------------------------------------------
+
+def _epoch_to_iso(ts: Any) -> str:
+    """Render a ping timestamp as ISO-8601. Offline-JSON pings use epoch
+    seconds; pass through strings unchanged (already ISO in practice)."""
+    if ts is None:
+        return ""
+    if isinstance(ts, str):
+        return ts
+    try:
+        return datetime.datetime.fromtimestamp(
+            int(ts), datetime.timezone.utc).isoformat()
+    except (ValueError, OSError, OverflowError):
+        return str(ts)
+
+
+def _ping_to_records(ping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Map one offline-JSON ping to meshcore records.
+
+    DISC pings name a single repeater with full telemetry (real local_rssi +
+    local_snr + node_type). RX pings carry a `heard_repeats` token list with
+    SNR only, same grammar as the CSV packed columns (so rssi stays None).
+    """
+    ptype = str(ping.get("type") or "").upper()
+    ts = _epoch_to_iso(ping.get("timestamp"))
+    lat = _safe_float(ping.get("lat"))
+    lon = _safe_float(ping.get("lon"))
+    if ptype == "DISC":
+        node_id = ping.get("repeater_id")
+        if not node_id:
+            return []
+        node_type = str(ping.get("node_type") or DEFAULT_NODE_TYPE).lower()
+        snr = ping.get("local_snr")
+        rssi = ping.get("local_rssi")
+        return [{
+            "timestamp": ts,
+            "node_id": node_id,
+            "type": node_type,
+            "name": "",
+            "lat": lat,
+            "lon": lon,
+            "rssi": _safe_float(rssi) if rssi is not None else None,
+            "snr": _safe_float(snr) if snr is not None else None,
+        }]
+    if ptype == "RX":
+        out: list[dict[str, Any]] = []
+        for tok in str(ping.get("heard_repeats") or "").split(","):
+            rec = _node_token_to_record(tok, ts, lat, lon)
+            if rec is not None:
+                out.append(rec)
+        return out
+    return []
+
+
+def parse_offline_json_obj(data: dict[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for ping in data.get("pings", []):
+        if isinstance(ping, dict):
+            records.extend(_ping_to_records(ping))
+    return records
+
+
+def parse_offline_json(path: Path) -> list[dict[str, Any]]:
+    """Parse a MeshCore 'offline' ping-log JSON export (DISC + RX pings)."""
+    return parse_offline_json_obj(json.loads(path.read_text(encoding="utf-8")))
+
+
+# ---------------------------------------------------------------------------
+# Format dispatch
+# ---------------------------------------------------------------------------
+
+def parse_file(path: Path) -> tuple[list[dict[str, Any]], str]:
+    """Detect the capture format and parse it. Returns (records, format_id).
+
+    Dispatch by extension first; for unknown/missing extensions, sniff the
+    first non-space byte ('{' -> JSON, else CSV).
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return parse_offline_json(path), "meshcore-offline-json"
+    if suffix in (".csv", ".txt"):
+        return parse_meshmapper_csv(path), "meshmapper-csv"
+    head = path.read_text(encoding="utf-8", errors="replace").lstrip()[:1]
+    if head == "{":
+        return parse_offline_json(path), "meshcore-offline-json"
+    return parse_meshmapper_csv(path), "meshmapper-csv"
 
 
 # ---------------------------------------------------------------------------
@@ -920,9 +1153,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="pull the latest version of heimdall (uses git pull if "
                         "you cloned the repo, otherwise downloads heimdall.py "
                         "from GitHub)")
-    p.add_argument("csv", nargs="?", type=Path,
-                   help="MeshMapper CSV export. Not required for --setup, "
-                        "--save-key, --whoami, or --update.")
+    p.add_argument("csv", nargs="?", type=Path, metavar="capture",
+                   help="MeshMapper CSV export (flat or multi-section TX/RX/"
+                        "DISC) or a MeshCore offline ping-log JSON. Format is "
+                        "auto-detected. Not required for --setup, --save-key, "
+                        "--whoami, or --update.")
     p.add_argument("--setup", action="store_true",
                    help="interactive first-time setup, prompts for your "
                         "WDGoWars API key, validates it, and saves it locally.")
@@ -1044,8 +1279,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"file not found: {args.csv}", file=sys.stderr)
         return 2
 
-    nodes = parse_meshmapper_csv(args.csv)
-    print(f"parsed {len(nodes)} meshcore nodes from {args.csv.name}")
+    try:
+        nodes, fmt = parse_file(args.csv)
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"could not parse {args.csv.name}: {e}", file=sys.stderr)
+        return 1
+    print(f"parsed {len(nodes)} meshcore nodes from {args.csv.name} ({fmt})")
     if not nodes:
         print("nothing to upload", file=sys.stderr)
         return 1

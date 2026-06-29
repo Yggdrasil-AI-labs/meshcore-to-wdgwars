@@ -1,0 +1,8 @@
+--- TX Log ---
+timestamp,latitude,longitude,power,events
+2026-06-27T11:37:20.859937,0.0,0.0,0.6,0CE8(-0.25)
+
+--- DISC Log ---
+timestamp,latitude,longitude,noisefloor,node_count,nodes
+2026-06-27T11:36:48.792735,0.0,0.0,-99,2,910E(R)(-6.00),0CE8(R)(1.25)
+

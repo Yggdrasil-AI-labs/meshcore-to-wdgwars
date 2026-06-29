@@ -78,6 +78,118 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(rows[0]["node_id"], "abc")
 
 
+# A real MeshMapper multi-section export (TX + DISC), scrubbed lat/lon.
+SECTIONED_CSV = """--- TX Log ---
+timestamp,latitude,longitude,power,events
+2026-06-27T11:37:20.859937,0.0,0.0,0.6,0CE8(-0.25)
+
+--- DISC Log ---
+timestamp,latitude,longitude,noisefloor,node_count,nodes
+2026-06-27T11:36:48.792735,0.0,0.0,-99,2,910E(R)(-6.00),0CE8(R)(1.25)
+"""
+
+# A MeshCore offline ping-log JSON: one DISC (full telemetry) + one RX (token).
+OFFLINE_JSON = json.dumps({
+    "offline": True,
+    "created_at": "2026-06-26T07:09:24.525009",
+    "ping_count": 2,
+    "device_name": "EXAMPLE_NODE",
+    "pings": [
+        {"type": "DISC", "lat": 0.0, "lon": 0.0, "noisefloor": -99,
+         "repeater_id": "0CE8", "node_type": "REPEATER",
+         "local_snr": 2.25, "local_rssi": -98, "remote_snr": -11.25,
+         "public_key": "0CE8FE", "timestamp": 1782450531, "power": "0.6w"},
+        {"type": "RX", "lat": 0.0, "lon": 0.0, "noisefloor": -102,
+         "heard_repeats": "FB03(-8.00)", "timestamp": 1782450685,
+         "power": "0.6w"},
+    ],
+})
+
+
+def _write_tmp(text: str, suffix: str) -> Path:
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False,
+                                    encoding="utf-8")
+    f.write(text)
+    f.close()
+    return Path(f.name)
+
+
+class SectionedCsvTests(unittest.TestCase):
+    def setUp(self):
+        self.path = _write_tmp(SECTIONED_CSV, ".csv")
+
+    def test_parses_tx_and_disc_nodes(self):
+        rows = heimdall.parse_meshmapper_csv(self.path)
+        # 1 TX event + 2 DISC nodes
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([r["node_id"] for r in rows], ["0CE8", "910E", "0CE8"])
+        self.assertEqual([r["snr"] for r in rows], [-0.25, -6.0, 1.25])
+
+    def test_disc_repeater_marker_maps_to_repeater(self):
+        rows = heimdall.parse_meshmapper_csv(self.path)
+        self.assertTrue(all(r["type"] == "repeater" for r in rows))
+
+    def test_packed_csv_has_no_rssi(self):
+        # TX/DISC sections carry no per-node RSSI, only a noise floor.
+        rows = heimdall.parse_meshmapper_csv(self.path)
+        self.assertTrue(all(r["rssi"] is None for r in rows))
+
+    def test_dispatch_returns_csv_format(self):
+        rows, fmt = heimdall.parse_file(self.path)
+        self.assertEqual(fmt, "meshmapper-csv")
+        self.assertEqual(len(rows), 3)
+
+
+class OfflineJsonTests(unittest.TestCase):
+    def setUp(self):
+        self.path = _write_tmp(OFFLINE_JSON, ".json")
+
+    def test_parses_disc_and_rx(self):
+        rows = heimdall.parse_offline_json(self.path)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["node_id"], "0CE8")
+        self.assertEqual(rows[1]["node_id"], "FB03")
+
+    def test_disc_carries_real_rssi_and_snr(self):
+        rows = heimdall.parse_offline_json(self.path)
+        disc = rows[0]
+        self.assertEqual(disc["rssi"], -98.0)
+        self.assertEqual(disc["snr"], 2.25)
+        self.assertEqual(disc["type"], "repeater")  # REPEATER lower-cased
+
+    def test_rx_token_has_snr_but_no_rssi(self):
+        rows = heimdall.parse_offline_json(self.path)
+        rx = rows[1]
+        self.assertEqual(rx["snr"], -8.0)
+        self.assertIsNone(rx["rssi"])
+
+    def test_epoch_timestamp_becomes_iso(self):
+        rows = heimdall.parse_offline_json(self.path)
+        self.assertTrue(rows[0]["timestamp"].startswith("2026-"))
+
+    def test_dispatch_detects_json_by_extension(self):
+        rows, fmt = heimdall.parse_file(self.path)
+        self.assertEqual(fmt, "meshcore-offline-json")
+        self.assertEqual(len(rows), 2)
+
+
+class NodeTokenTests(unittest.TestCase):
+    def test_disc_token_with_marker(self):
+        rec = heimdall._node_token_to_record("910E(R)(-6.00)", "t", 0.0, 0.0)
+        self.assertEqual(rec["node_id"], "910E")
+        self.assertEqual(rec["type"], "repeater")
+        self.assertEqual(rec["snr"], -6.0)
+
+    def test_tx_token_without_marker(self):
+        rec = heimdall._node_token_to_record("0CE8(-0.25)", "t", 0.0, 0.0)
+        self.assertEqual(rec["node_id"], "0CE8")
+        self.assertEqual(rec["snr"], -0.25)
+
+    def test_garbage_token_returns_none(self):
+        self.assertIsNone(heimdall._node_token_to_record("", "t", 0.0, 0.0))
+        self.assertIsNone(heimdall._node_token_to_record("notatoken", "t", 0.0, 0.0))
+
+
 class EnvelopeTests(unittest.TestCase):
     def test_envelope_shape(self):
         rows = [

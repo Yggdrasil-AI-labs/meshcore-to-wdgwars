@@ -89,8 +89,8 @@ from pathlib import Path
 import heimdall
 
 p = Path(${JSON.stringify(dst)})
-records = heimdall.parse_meshmapper_csv(p)
-json.dumps({"records": records, "format": "meshmapper-csv"})
+records, fmt = heimdall.parse_file(p)
+json.dumps({"records": records, "format": fmt})
 `);
   } catch (e) {
     const raw = String(e.message || e);
@@ -111,8 +111,9 @@ json.dumps({"records": records, "format": "meshmapper-csv"})
   if (!parsed.records.length) {
     setStatus(
       `No meshcore nodes found in ${file.name}. ` +
-      `Check that the file is a MeshMapper "Logs → Copy CSV" export with the header ` +
-      `'timestamp,repeater_id,snr,rssi,path_length,header,latitude,longitude,path_hops'.`,
+      `Expected a MeshMapper CSV export (flat "Logs → Copy CSV", or a ` +
+      `multi-section file with --- TX/RX/DISC Log --- blocks) or a ` +
+      `MeshCore offline ping-log .json.`,
       "warn",
     );
     return;

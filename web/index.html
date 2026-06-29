@@ -443,11 +443,11 @@
 
   <div class="panel">
     <span class="panel-label">drop zone</span>
-    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop MeshMapper CSV here">
-      <strong>Drop MeshMapper CSV</strong>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop a MeshMapper CSV or MeshCore JSON here">
+      <strong>Drop MeshMapper CSV or MeshCore JSON</strong>
       <small>or click to browse</small>
-      <span class="formats">.csv .txt // MeshMapper "Logs → Copy CSV" export</span>
-      <input type="file" id="file" accept=".csv,.txt,text/csv,text/plain">
+      <span class="formats">.csv .txt .json // MeshMapper "Copy CSV" / multi-section log / offline ping-log</span>
+      <input type="file" id="file" accept=".csv,.txt,.json,text/csv,text/plain,application/json">
     </div>
     <div class="status" id="status"><span class="spinner"></span>booting heimdall runtime...</div>
   </div>
