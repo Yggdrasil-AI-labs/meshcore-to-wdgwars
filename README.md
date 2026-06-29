@@ -330,6 +330,7 @@ The target per-record schema is `timestamp, node_id, type, name, lat, lon, rssi,
 - **Muninn** ([adsb-to-wdgwars](https://github.com/Yggdrasil-AI-labs/adsb-to-wdgwars)) — parent pattern. HMAC envelope, three-deploy-mode design, Pyodide web flavour all originate there.
 - **FusedStamen** — surfaced the WDGoWars mesh ingest target schema and suggested the MeshMapper CSV bridge angle.
 - **Wild!Radio** — supplied the MeshMapper RX-log sample used to wire the field map.
+- **[@nicolasrata](https://github.com/nicolasrata)** — contributed the first real-world baseline ([issue #1](https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/issues/1)): a multi-section MeshMapper export and a MeshCore offline ping-log JSON, which is what the v0.4.0 section-aware CSV and JSON parsers were built and tested against.
 - **MeshMapper** ([wiki](https://wiki.meshmapper.net/)) — upstream Meshcore visualisation platform whose CSV export is Heimdall's first supported input.
 
 ---
