@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
@@ -649,6 +649,25 @@ def upload(
 # Daily version check + self-update
 # ---------------------------------------------------------------------------
 
+def _version_tuple(v: str) -> tuple[int, ...] | None:
+    """Parse a dotted version string like '0.4.0' into an int tuple for
+    ordering. Returns None if any component isn't a plain integer."""
+    try:
+        return tuple(int(p) for p in v.split("."))
+    except ValueError:
+        return None
+
+
+def _is_newer(latest: str, current: str) -> bool:
+    """True only if `latest` is a well-formed dotted version strictly
+    greater than `current`. A malformed tag never triggers the notice —
+    silently skipping beats wrongly telling someone on v0.4.0 to "upgrade"
+    to v0.3.0, which is what a plain `latest != current` check does the
+    moment GitHub's "latest release" isn't the highest version (issue #9)."""
+    lt, ct = _version_tuple(latest), _version_tuple(current)
+    return lt is not None and ct is not None and lt > ct
+
+
 def _check_for_update() -> str | None:
     """Quick non-blocking version check against the GitHub releases API.
     Cached for 24h in the user's config dir so we do not hammer the API.
@@ -659,7 +678,7 @@ def _check_for_update() -> str | None:
             blob = json.loads(cache.read_text())
             if time.time() - blob.get("checked_at", 0) < 86400:
                 latest = blob.get("latest")
-                return latest if latest and latest != __version__ else None
+                return latest if latest and _is_newer(latest, __version__) else None
     except Exception:
         pass
     try:
@@ -676,7 +695,7 @@ def _check_for_update() -> str | None:
         cache.write_text(json.dumps({"checked_at": time.time(), "latest": latest}))
     except Exception:
         pass
-    return latest if latest and latest != __version__ else None
+    return latest if latest and _is_newer(latest, __version__) else None
 
 
 def _run_update() -> int:

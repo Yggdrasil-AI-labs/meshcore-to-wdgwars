@@ -261,6 +261,21 @@ class VersionTests(unittest.TestCase):
         self.assertIsInstance(heimdall.__version__, str)
         self.assertRegex(heimdall.__version__, r"^\d+\.\d+\.\d+")
 
+    def test_is_newer_true_for_higher_version(self):
+        self.assertTrue(heimdall._is_newer("0.4.1", "0.4.0"))
+        self.assertTrue(heimdall._is_newer("0.5.0", "0.4.9"))
+        self.assertTrue(heimdall._is_newer("1.0.0", "0.9.9"))
+
+    def test_is_newer_false_for_lower_or_equal_version(self):
+        # Regression for #9: GitHub's "latest release" lagging behind the
+        # installed __version__ must never be reported as an upgrade.
+        self.assertFalse(heimdall._is_newer("0.3.0", "0.4.0"))
+        self.assertFalse(heimdall._is_newer("0.4.0", "0.4.0"))
+
+    def test_is_newer_false_for_unparseable_tags(self):
+        self.assertFalse(heimdall._is_newer("not-a-version", "0.4.0"))
+        self.assertFalse(heimdall._is_newer("0.4.0", "not-a-version"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

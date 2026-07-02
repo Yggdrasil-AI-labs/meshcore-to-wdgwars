@@ -4,6 +4,20 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - Fix false "older version available" update notice
+
+### Fixed
+
+- The daily update check compared the latest GitHub release tag to
+  `__version__` with a plain inequality, so any mismatch — including the
+  release process lagging behind a version bump already in code — was
+  reported as "a newer version is available," even when the tag was
+  actually older (issue #9). `_check_for_update()` now orders versions as
+  int tuples and only surfaces the notice when the tag is genuinely higher.
+- No GitHub Release had been published for 0.3.1 or 0.4.0, so
+  `/releases/latest` was legitimately still returning `v0.3.0` — the stale
+  release is also being cut alongside this fix.
+
 ## [0.4.0] - Real MeshMapper formats: multi-section CSV + offline JSON
 
 First release driven by real-world capture data (issue #1 baseline,
