@@ -189,6 +189,18 @@ class MainCapturePathTests(unittest.TestCase):
         self.assertEqual(
             self._main(["--no-version-check", "-q", "bad\ncapture.csv"]), 2)
 
+    def test_valid_capture_is_read_via_validated_path(self):
+        # The is_file() success branch: a real file resolves, passes the
+        # boundary, and is read through parse_file. --preview parses and exits
+        # 0 without needing a key or the network.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "cap.json"
+            f.write_text('{"pings":[{"type":"DISC","repeater_id":"n1",'
+                         '"timestamp":0,"lat":1.0,"lon":2.0}]}')
+            self.assertEqual(
+                self._main(["--no-version-check", "-q", "--preview", str(f)]),
+                0)
+
 
 if __name__ == "__main__":
     unittest.main()
