@@ -4,6 +4,41 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - Fix the meshcore record schema: every upload was silently dropped
+
+Every meshcore upload attempt on record — two different real MeshMapper
+exports, tested a week apart by @nicolasrata — was accepted by wdgwars.pl
+(`ok: true`) but came back with `meshcore_imported: 0` and no
+`meshcore_already_seen` key at all. The record shape Heimdall built was
+wrong:
+
+- `type` held the node's own role (e.g. `"repeater"`). wdgwars.pl expects
+  `type` to be a constant marking the record as part of the meshcore
+  family (`"MESHCORE"`), with the actual role in a separate `node_type`
+  field, which Heimdall never sent.
+- The date field was `timestamp` in full ISO-8601 with microseconds.
+  wdgwars.pl expects `first_seen` as `YYYY-MM-DD HH:MM:SS`.
+
+The server never errors on an unrecognized record shape — it just accepts
+the envelope and counts nothing, which is why this went unnoticed for two
+independent test rounds. New target schema:
+
+```
+node_id, node_type, name, lat, lon, rssi, snr, first_seen, type
+```
+
+This has not yet been confirmed against a live upload post-fix; if you
+hit this, please pull `--update` and report back whether `meshcore_imported`
+moves off zero.
+
+### Fixed
+
+- `_normalise_meshmapper_row`, `_node_token_to_record`, and `_ping_to_records`
+  now all build records via a single `_build_record()` helper emitting the
+  corrected shape (`node_type` + constant `type: "MESHCORE"` + `first_seen`).
+- `DEFAULT_NODE_TYPE` and the `(R)` marker map now normalise to uppercase
+  (`"REPEATER"`) to match the confirmed casing convention.
+
 ## [0.4.1] - Fix false "older version available" update notice
 
 ### Fixed

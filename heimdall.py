@@ -6,9 +6,11 @@ Sibling of Muninn (adsb-to-wdgwars). Same HMAC envelope, same /api/upload/
 endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills
 `meshcore_nodes`.
 
-Target schema (per the WDGoWars mesh ingest, shared by FusedStamen):
+Target schema (`type` is the constant envelope marker; the node's own role
+goes in the separate `node_type` field — earlier releases swapped these two
+and had every upload accepted with meshcore_imported: 0):
 
-    timestamp, node_id, type, name, lat, lon, rssi, snr
+    node_id, node_type, name, lat, lon, rssi, snr, first_seen, type
 
 License: MIT
 """
@@ -36,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
@@ -48,14 +50,28 @@ SCHEDULE_MARKER = "managed-by-heimdall"
 SYSTEMD_UNIT_NAME = "heimdall"  # .service + .timer share this stem
 WINDOWS_TASK_NAME = "Heimdall"
 DEFAULT_SCHEDULE_TIME = "03:00"
-TARGET_FIELDS = ("timestamp", "node_id", "type", "name", "lat", "lon", "rssi", "snr")
+TARGET_FIELDS = ("node_id", "node_type", "name", "lat", "lon", "rssi", "snr",
+                  "first_seen", "type")
 
 MESHMAPPER_RX_HEADERS = (
     "timestamp", "repeater_id", "snr", "rssi", "path_length",
     "header", "latitude", "longitude", "path_hops",
 )
 
-DEFAULT_NODE_TYPE = "repeater"
+# Every record in the meshcore_nodes envelope carries a constant `type` —
+# it marks the record as belonging to this envelope family, mirroring how
+# Muninn's `aircraft` records don't repeat "aircraft" per row. The node's
+# own role (repeater/client/zigbee/...) goes in the separate `node_type`
+# field. A prior mesh feeder confirmed this shape live (a push using
+# node_type + a constant `type: MESHCORE` returned meshcore_imported: 1).
+# Every Heimdall release before this one put the role in `type` and never
+# sent `node_type` at all, and every one of those uploads came back
+# accepted (ok: true) but with meshcore_imported: 0 — the server silently
+# drops unrecognised record shapes rather than erroring, so this is easy
+# to get wrong quietly. See CHANGELOG for the v0.4.2 writeup.
+MESHCORE_ENVELOPE_TYPE = "MESHCORE"
+
+DEFAULT_NODE_TYPE = "REPEATER"
 
 # A real MeshMapper export is a multi-section file. Each block starts with a
 # marker line like "--- DISC Log ---" and carries its own header row:
@@ -91,7 +107,7 @@ _NODE_TOKEN_RE = re.compile(
 # from the 2026-06-27 baseline; other markers (companion/client, room server)
 # are normalised to the default until a real sample pins their letters down.
 # Do not guess at letters we have not actually seen.
-_NODE_TYPE_MARKERS = {"R": "repeater"}
+_NODE_TYPE_MARKERS = {"R": "REPEATER"}
 
 
 def _safe_float(value: Any) -> float:
@@ -99,6 +115,37 @@ def _safe_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _format_first_seen(ts: str) -> str:
+    """Render a timestamp as wdgwars.pl's confirmed `first_seen` shape:
+    'YYYY-MM-DD HH:MM:SS' (space-separated, no fractional seconds or UTC
+    offset). Falls back to the raw string on anything that doesn't parse;
+    better to send something than raise mid-upload over a formatting
+    mismatch."""
+    try:
+        return datetime.datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return ts
+
+
+def _build_record(node_id: str, node_type: str, name: str,
+                  lat: float, lon: float, rssi: float | None,
+                  snr: float | None, timestamp: str) -> dict[str, Any]:
+    """Assemble one meshcore_nodes record in the confirmed wdgwars.pl wire
+    shape (`type` is the constant envelope marker, `node_type` carries the
+    node's actual role, the date field is `first_seen`)."""
+    return {
+        "node_id": node_id,
+        "node_type": node_type.upper(),
+        "name": name,
+        "lat": lat,
+        "lon": lon,
+        "rssi": rssi,
+        "snr": snr,
+        "first_seen": _format_first_seen(timestamp),
+        "type": MESHCORE_ENVELOPE_TYPE,
+    }
 
 
 def _node_token_to_record(token: str, timestamp: str,
@@ -118,16 +165,8 @@ def _node_token_to_record(token: str, timestamp: str,
     node_id, marker, snr_s = m.group(1), m.group(2), m.group(3)
     node_type = (_NODE_TYPE_MARKERS.get(marker.upper(), DEFAULT_NODE_TYPE)
                  if marker else DEFAULT_NODE_TYPE)
-    return {
-        "timestamp": timestamp,
-        "node_id": node_id,
-        "type": node_type,
-        "name": "",
-        "lat": lat,
-        "lon": lon,
-        "rssi": None,
-        "snr": float(snr_s),
-    }
+    return _build_record(node_id, node_type, "", lat, lon, None,
+                        float(snr_s), timestamp)
 
 # Explicit SSL context. urllib defaults to system trust + full cert verification
 # since Python 3.4.3 (PEP 476); being explicit just makes that obvious in review.
@@ -367,7 +406,7 @@ def _normalise_meshmapper_row(row: dict[str, str]) -> dict[str, Any] | None:
         timestamp,repeater_id,snr,rssi,path_length,header,latitude,longitude,path_hops
 
     Target schema:
-        timestamp,node_id,type,name,lat,lon,rssi,snr
+        node_id,node_type,name,lat,lon,rssi,snr,first_seen,type
 
     Returns None for rows missing required fields or with unparseable numerics.
     Paste-damaged rows skip silently this way.
@@ -382,16 +421,8 @@ def _normalise_meshmapper_row(row: dict[str, str]) -> dict[str, Any] | None:
     except (TypeError, ValueError, KeyError):
         return None
 
-    return {
-        "timestamp": row["timestamp"],
-        "node_id": row["repeater_id"],
-        "type": DEFAULT_NODE_TYPE,
-        "name": "",
-        "lat": lat,
-        "lon": lon,
-        "rssi": rssi,
-        "snr": snr,
-    }
+    return _build_record(row["repeater_id"], DEFAULT_NODE_TYPE, "",
+                        lat, lon, rssi, snr, row["timestamp"])
 
 
 def _split_sections(lines: list[str]) -> list[tuple[str | None, list[str]]]:
@@ -534,19 +565,14 @@ def _ping_to_records(ping: dict[str, Any]) -> list[dict[str, Any]]:
         node_id = ping.get("repeater_id")
         if not node_id:
             return []
-        node_type = str(ping.get("node_type") or DEFAULT_NODE_TYPE).lower()
+        node_type = str(ping.get("node_type") or DEFAULT_NODE_TYPE)
         snr = ping.get("local_snr")
         rssi = ping.get("local_rssi")
-        return [{
-            "timestamp": ts,
-            "node_id": node_id,
-            "type": node_type,
-            "name": "",
-            "lat": lat,
-            "lon": lon,
-            "rssi": _safe_float(rssi) if rssi is not None else None,
-            "snr": _safe_float(snr) if snr is not None else None,
-        }]
+        return [_build_record(
+            node_id, node_type, "", lat, lon,
+            _safe_float(rssi) if rssi is not None else None,
+            _safe_float(snr) if snr is not None else None, ts,
+        )]
     if ptype == "RX":
         out: list[dict[str, Any]] = []
         for tok in str(ping.get("heard_repeats") or "").split(","):

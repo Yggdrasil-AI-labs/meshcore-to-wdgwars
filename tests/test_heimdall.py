@@ -41,9 +41,10 @@ class ParserTests(unittest.TestCase):
     def test_field_mapping(self):
         rows = heimdall.parse_meshmapper_csv(self.path)
         first = rows[0]
-        self.assertEqual(first["timestamp"], "2026-05-21T13:20:11.520125")
+        self.assertEqual(first["first_seen"], "2026-05-21 13:20:11")
         self.assertEqual(first["node_id"], "E4")
-        self.assertEqual(first["type"], "repeater")
+        self.assertEqual(first["node_type"], "REPEATER")
+        self.assertEqual(first["type"], "MESHCORE")
         self.assertEqual(first["name"], "")
         self.assertEqual(first["lat"], 0.0)
         self.assertEqual(first["lon"], 0.0)
@@ -127,7 +128,8 @@ class SectionedCsvTests(unittest.TestCase):
 
     def test_disc_repeater_marker_maps_to_repeater(self):
         rows = heimdall.parse_meshmapper_csv(self.path)
-        self.assertTrue(all(r["type"] == "repeater" for r in rows))
+        self.assertTrue(all(r["node_type"] == "REPEATER" for r in rows))
+        self.assertTrue(all(r["type"] == "MESHCORE" for r in rows))
 
     def test_packed_csv_has_no_rssi(self):
         # TX/DISC sections carry no per-node RSSI, only a noise floor.
@@ -155,7 +157,8 @@ class OfflineJsonTests(unittest.TestCase):
         disc = rows[0]
         self.assertEqual(disc["rssi"], -98.0)
         self.assertEqual(disc["snr"], 2.25)
-        self.assertEqual(disc["type"], "repeater")  # REPEATER lower-cased
+        self.assertEqual(disc["node_type"], "REPEATER")
+        self.assertEqual(disc["type"], "MESHCORE")
 
     def test_rx_token_has_snr_but_no_rssi(self):
         rows = heimdall.parse_offline_json(self.path)
@@ -163,9 +166,10 @@ class OfflineJsonTests(unittest.TestCase):
         self.assertEqual(rx["snr"], -8.0)
         self.assertIsNone(rx["rssi"])
 
-    def test_epoch_timestamp_becomes_iso(self):
+    def test_epoch_timestamp_becomes_first_seen(self):
         rows = heimdall.parse_offline_json(self.path)
-        self.assertTrue(rows[0]["timestamp"].startswith("2026-"))
+        self.assertTrue(rows[0]["first_seen"].startswith("2026-"))
+        self.assertNotIn("T", rows[0]["first_seen"])
 
     def test_dispatch_detects_json_by_extension(self):
         rows, fmt = heimdall.parse_file(self.path)
@@ -177,7 +181,8 @@ class NodeTokenTests(unittest.TestCase):
     def test_disc_token_with_marker(self):
         rec = heimdall._node_token_to_record("910E(R)(-6.00)", "t", 0.0, 0.0)
         self.assertEqual(rec["node_id"], "910E")
-        self.assertEqual(rec["type"], "repeater")
+        self.assertEqual(rec["node_type"], "REPEATER")
+        self.assertEqual(rec["type"], "MESHCORE")
         self.assertEqual(rec["snr"], -6.0)
 
     def test_tx_token_without_marker(self):
