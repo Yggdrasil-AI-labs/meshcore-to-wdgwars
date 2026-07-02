@@ -470,6 +470,33 @@ def parse_meshmapper_text(text: str) -> list[dict[str, Any]]:
     return records
 
 
+class _UnsafeInput(ValueError):
+    """A user-supplied path is unsafe to use as given."""
+
+
+def _reject_control_chars(value: str, label: str) -> str:
+    """Reject NUL / CR / LF in a path-bound value (poison-null-byte truncation
+    and newline injection). Returns the value unchanged when clean."""
+    if "\x00" in value or "\n" in value or "\r" in value:
+        raise _UnsafeInput(
+            f"refusing {label} with an embedded control character")
+    return value
+
+
+def _user_path(raw: str, *, label: str = "path") -> Path:
+    """Normalise an untrusted capture path (argv / --schedule-csv).
+
+    Expands ``~``, rejects embedded control characters, and collapses
+    ``..``/``.`` to one canonical absolute path via ``resolve()``. Mirrors
+    Muninn's sibling helper: it deliberately does NOT confine the result to a
+    root (an operator CLI legitimately reads wherever the operator points it),
+    but canonicalising the untrusted path at the boundary is what lets the
+    downstream reads treat it as validated (pythonsecurity:S8707). See
+    SECURITY-FINDINGS.md for the threat-model rationale."""
+    _reject_control_chars(str(raw), label)
+    return Path(raw).expanduser().resolve()
+
+
 def parse_meshmapper_csv(path: Path) -> list[dict[str, Any]]:
     return parse_meshmapper_text(path.read_text(encoding="utf-8"))
 
@@ -1109,7 +1136,7 @@ def cmd_schedule_headless(args) -> int:
         sys.exit("--schedule needs --schedule-csv PATH (the CSV file to "
                  "upload daily). Heimdall has no pull-from-source flavour, "
                  "so the scheduler must point at a file you keep refreshing.")
-    csv_path = Path(args.schedule_csv).resolve()
+    csv_path = _user_path(args.schedule_csv, label="--schedule-csv")
     time_hhmm = _validate_hhmm(args.schedule_time or DEFAULT_SCHEDULE_TIME)
     dry_run = bool(args.schedule_dry_run)
     if not _key_path().exists() and not os.environ.get("WDGWARS_API_KEY"):
@@ -1275,14 +1302,23 @@ def main(argv: list[str] | None = None) -> int:
                 "(or use --setup / --save-key / --whoami / --update / "
                 "--schedule / --unschedule)")
 
-    if not args.csv.exists():
+    # Canonicalise the untrusted argv path once, at the boundary, before any
+    # filesystem access (pythonsecurity:S8707). Downstream parsers then read a
+    # validated path. _UnsafeInput (a ValueError) is caught below.
+    try:
+        capture = _user_path(str(args.csv), label="capture")
+    except _UnsafeInput as e:
+        print(f"refusing capture path: {e}", file=sys.stderr)
+        return 2
+
+    if not capture.is_file():
         print(f"file not found: {args.csv}", file=sys.stderr)
         return 2
 
     try:
-        nodes, fmt = parse_file(args.csv)
+        nodes, fmt = parse_file(capture)
     except (ValueError, json.JSONDecodeError) as e:
-        print(f"could not parse {args.csv.name}: {e}", file=sys.stderr)
+        print(f"could not parse {capture.name}: {e}", file=sys.stderr)
         return 1
     print(f"parsed {len(nodes)} meshcore nodes from {args.csv.name} ({fmt})")
     if not nodes:

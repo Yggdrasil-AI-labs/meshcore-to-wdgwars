@@ -136,5 +136,36 @@ class SaveKeyTests(unittest.TestCase):
                              f"secret file is group/other-accessible: {oct(mode)}")
 
 
+class UserPathValidationTests(unittest.TestCase):
+    """The capture path arrives from argv (and --schedule-csv), so it is
+    canonicalised at the boundary before any read (pythonsecurity:S8707).
+    _user_path is that sanitizer; lock in its guarantees."""
+
+    def test_rejects_control_chars(self):
+        for bad in ("cap\x00.csv", "cap\n.csv", "cap\r.csv"):
+            with self.assertRaises(heimdall._UnsafeInput, msg=bad):
+                heimdall._user_path(bad, label="capture")
+
+    def test_unsafe_input_is_a_valueerror(self):
+        # main() catches ValueError/_UnsafeInput on the parse path; keep the
+        # subclass relationship so that catch keeps covering it.
+        self.assertTrue(issubclass(heimdall._UnsafeInput, ValueError))
+
+    def test_collapses_traversal_to_absolute(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d).resolve()
+            f = base / "nightly.csv"
+            f.write_text("x")
+            got = heimdall._user_path(str(base / "sub" / ".." / "nightly.csv"),
+                                      label="capture")
+            self.assertTrue(got.is_absolute())
+            self.assertEqual(got, f)
+
+    def test_expands_user_home(self):
+        got = heimdall._user_path("~/cap.csv", label="capture")
+        self.assertNotIn("~", str(got))
+        self.assertTrue(got.is_absolute())
+
+
 if __name__ == "__main__":
     unittest.main()
