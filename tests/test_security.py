@@ -167,5 +167,28 @@ class UserPathValidationTests(unittest.TestCase):
         self.assertTrue(got.is_absolute())
 
 
+class MainCapturePathTests(unittest.TestCase):
+    """main() canonicalises the argv capture path at the boundary before any
+    read (pythonsecurity:S8707); cover both rejection branches so the boundary
+    stays exercised."""
+
+    def _main(self, argv):
+        import io
+        from contextlib import redirect_stderr
+        with redirect_stderr(io.StringIO()):
+            return heimdall.main(argv)
+
+    def test_nonexistent_capture_returns_2(self):
+        missing = str(Path(tempfile.gettempdir()) /
+                      "heimdall-does-not-exist-xyzzy.csv")
+        self.assertEqual(self._main(["--no-version-check", "-q", missing]), 2)
+
+    def test_control_char_capture_is_refused(self):
+        # A newline in the path trips _reject_control_chars -> _UnsafeInput,
+        # caught in main() and turned into exit code 2 (never reaches a read).
+        self.assertEqual(
+            self._main(["--no-version-check", "-q", "bad\ncapture.csv"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
