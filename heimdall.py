@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
@@ -136,16 +136,21 @@ def _build_record(node_id: str, node_type: str, name: str,
     shape (`type` is the constant envelope marker, `node_type` carries the
     node's actual role, the date field is `first_seen`).
 
-    `name` falls back to `node_id` rather than an empty string: the one
-    confirmed-working record on file always had a real name, MeshMapper
-    exports never do, and a blank required field is a plausible reason a
-    schema-correct-looking record still gets silently dropped. `snr` is
-    accepted as a parameter but deliberately dropped from the record: it
-    wasn't present in the confirmed-working shape, and an unrecognised
-    extra key is another plausible silent-drop cause. Revisit both once
-    wdgwars.pl confirms which (if either) actually mattered."""
+    `name` falls back to `node_id` (original casing, human-readable) rather
+    than an empty string: MeshMapper exports never carry a real name.
+
+    `node_id` itself is lower-cased: wdgwars.pl confirmed (2026-07-03) that
+    `/api/upload/`'s meshcore ingest gates every node on a real GPS fix, a
+    node_id that is 8-16 *lowercase* hex, and a known node_type, silently
+    dropping anything that misses. MeshMapper's real node IDs are uppercase
+    (e.g. "0CE8"), so this was one guaranteed rejection. The *length* gate
+    (8-16 hex) is a separate, unresolved problem: real MeshMapper IDs run
+    2-4 hex chars, so even lower-cased they may still miss on length alone
+    — nothing to pad with here since we're never given more bytes than
+    MeshMapper exposes. Left for wdgwars.pl to confirm via
+    meshcore_reject_reasons."""
     return {
-        "node_id": node_id,
+        "node_id": node_id.lower(),
         "node_type": node_type.upper(),
         "name": name or node_id,
         "lat": lat,
@@ -1399,10 +1404,14 @@ def main(argv: list[str] | None = None) -> int:
                 data = json.loads(body)
                 imp = data.get("meshcore_imported", 0)
                 seen = data.get("meshcore_already_seen", 0)
+                rejected = data.get("meshcore_rejected", 0)
+                reasons = data.get("meshcore_reject_reasons") or {}
                 badges = data.get("new_badges") or []
                 print(f"{_OK()} accepted by wdgwars.pl. "
                       f"{imp} new meshcore nodes, {seen} already on your account.",
                       file=sys.stderr)
+                if rejected:
+                    print(f"  {rejected} rejected: {reasons}", file=sys.stderr)
                 if badges:
                     print(f"  new badges: {badges}", file=sys.stderr)
             except Exception:

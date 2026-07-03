@@ -4,6 +4,33 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.4] - Lower-case node_id; surface wdgwars.pl's new reject reasons
+
+LOCOSP confirmed (2026-07-03, mod-reports) the actual cause behind v0.4.2
+and v0.4.3 both landing zero change: `/api/upload/`'s meshcore ingest has
+gated every node since 2026-05-24 on (1) a real GPS fix, (2) a node_id
+that is 8-16 *lowercase* hex, and (3) a recognised node_type — silently
+dropping anything that missed, with no `already_seen` or reject reason
+in the response to tell the difference. They've now shipped
+`meshcore_already_seen`, `meshcore_rejected`, and
+`meshcore_reject_reasons: {no_gps, bad_node_id, error}` on their end, and
+node_type mismatches now coerce to Unknown instead of being rejected.
+
+MeshMapper's real node IDs are uppercase (e.g. `0CE8`), so that was a
+guaranteed miss on the case gate alone — fixed here. The *length* gate is
+still an open question: real MeshMapper IDs run 2-4 hex chars, well under
+the 8-16 floor, and there's nothing to pad with since MeshMapper never
+gives us more bytes than that. Whether that's a client bug or something
+wdgwars.pl needs to relax is what `meshcore_reject_reasons` on the next
+live test will tell us.
+
+### Fixed
+
+- `_build_record()` lower-cases `node_id` before it goes on the wire.
+- CLI now prints `meshcore_rejected` and `meshcore_reject_reasons` when
+  present in the upload response, instead of only `meshcore_imported`/
+  `meshcore_already_seen`.
+
 ## [0.4.3] - Drop blank `name` and unrecognised `snr` from meshcore records
 
 v0.4.2 fixed the `type`/`node_type` swap, but a live re-test (@nicolasrata,
