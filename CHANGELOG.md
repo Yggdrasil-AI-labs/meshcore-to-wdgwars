@@ -9,15 +9,15 @@ All notable changes to Heimdall are documented here. Format follows
 LOCOSP confirmed (2026-07-03, mod-reports) the actual cause behind v0.4.2
 and v0.4.3 both landing zero change: `/api/upload/`'s meshcore ingest has
 gated every node since 2026-05-24 on (1) a real GPS fix, (2) a node_id
-that is 8-16 *lowercase* hex, and (3) a recognised node_type — silently
+that is 8-16 *lowercase* hex, and (3) a recognised node_type, silently
 dropping anything that missed, with no `already_seen` or reject reason
-in the response to tell the difference. They've now shipped
+in the response to tell the difference. He's now shipped
 `meshcore_already_seen`, `meshcore_rejected`, and
-`meshcore_reject_reasons: {no_gps, bad_node_id, error}` on their end, and
+`meshcore_reject_reasons: {no_gps, bad_node_id, error}` on his end, and
 node_type mismatches now coerce to Unknown instead of being rejected.
 
 MeshMapper's real node IDs are uppercase (e.g. `0CE8`), so that was a
-guaranteed miss on the case gate alone — fixed here. The *length* gate is
+guaranteed miss on the case gate alone, fixed here. The *length* gate is
 still an open question: real MeshMapper IDs run 2-4 hex chars, well under
 the 8-16 floor, and there's nothing to pad with since MeshMapper never
 gives us more bytes than that. Whether that's a client bug or something
@@ -34,12 +34,12 @@ live test will tell us.
 ## [0.4.3] - Drop blank `name` and unrecognised `snr` from meshcore records
 
 v0.4.2 fixed the `type`/`node_type` swap, but a live re-test (@nicolasrata,
-2026-07-03) still came back `meshcore_imported: 0` — unchanged from before
+2026-07-03) still came back `meshcore_imported: 0`, unchanged from before
 the fix, which means something else is also wrong. Two more differences
 from the one confirmed-working record on file:
 
 - Heimdall always sent `"name": ""` (MeshMapper exports carry no name
-  field). The confirmed-working record had a real, non-empty name — a
+  field). The confirmed-working record had a real, non-empty name: a
   blank required field is a plausible reason a schema-correct-looking
   record still gets silently dropped.
 - Heimdall sent an extra `snr` field not present in the confirmed shape.
@@ -48,7 +48,7 @@ from the one confirmed-working record on file:
 `name` now falls back to `node_id` when there's nothing better; `snr` is
 dropped from the wire record entirely (still computed internally, just
 not sent). Like v0.4.2, **this has not been confirmed against a live
-upload** — it's the next best-evidenced guess, not a verified fix.
+upload**: it's the next best-evidenced guess, not a verified fix.
 
 ### Fixed
 
@@ -57,8 +57,8 @@ upload** — it's the next best-evidenced guess, not a verified fix.
 
 ## [0.4.2] - Fix the meshcore record schema: every upload was silently dropped
 
-Every meshcore upload attempt on record — two different real MeshMapper
-exports, tested a week apart by @nicolasrata — was accepted by wdgwars.pl
+Every meshcore upload attempt on record (two different real MeshMapper
+exports, tested a week apart by @nicolasrata) was accepted by wdgwars.pl
 (`ok: true`) but came back with `meshcore_imported: 0` and no
 `meshcore_already_seen` key at all. The record shape Heimdall built was
 wrong:
@@ -70,7 +70,7 @@ wrong:
 - The date field was `timestamp` in full ISO-8601 with microseconds.
   wdgwars.pl expects `first_seen` as `YYYY-MM-DD HH:MM:SS`.
 
-The server never errors on an unrecognized record shape — it just accepts
+The server never errors on an unrecognized record shape. It just accepts
 the envelope and counts nothing, which is why this went unnoticed for two
 independent test rounds. New target schema:
 
@@ -95,14 +95,14 @@ moves off zero.
 ### Fixed
 
 - The daily update check compared the latest GitHub release tag to
-  `__version__` with a plain inequality, so any mismatch — including the
-  release process lagging behind a version bump already in code — was
+  `__version__` with a plain inequality, so any mismatch (including the
+  release process lagging behind a version bump already in code) was
   reported as "a newer version is available," even when the tag was
   actually older (issue #9). `_check_for_update()` now orders versions as
   int tuples and only surfaces the notice when the tag is genuinely higher.
 - No GitHub Release had been published for 0.3.1 or 0.4.0, so
-  `/releases/latest` was legitimately still returning `v0.3.0` — the stale
-  release is also being cut alongside this fix.
+  `/releases/latest` was legitimately still returning `v0.3.0`. The stale
+  release gap is also being closed alongside this fix.
 
 ## [0.4.0] - Real MeshMapper formats: multi-section CSV + offline JSON
 
