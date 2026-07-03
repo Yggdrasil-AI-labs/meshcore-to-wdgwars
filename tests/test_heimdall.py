@@ -45,11 +45,11 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(first["node_id"], "E4")
         self.assertEqual(first["node_type"], "REPEATER")
         self.assertEqual(first["type"], "MESHCORE")
-        self.assertEqual(first["name"], "")
+        self.assertEqual(first["name"], "E4")  # falls back to node_id
         self.assertEqual(first["lat"], 0.0)
         self.assertEqual(first["lon"], 0.0)
         self.assertEqual(first["rssi"], -111.0)
-        self.assertEqual(first["snr"], 5.75)
+        self.assertNotIn("snr", first)  # dropped from the wire record
 
     def test_numeric_coercion(self):
         rows = heimdall.parse_meshmapper_csv(self.path)
@@ -57,7 +57,6 @@ class ParserTests(unittest.TestCase):
             self.assertIsInstance(r["lat"], float)
             self.assertIsInstance(r["lon"], float)
             self.assertIsInstance(r["rssi"], float)
-            self.assertIsInstance(r["snr"], float)
 
     def test_variable_width_node_ids(self):
         rows = heimdall.parse_meshmapper_csv(self.path)
@@ -124,7 +123,7 @@ class SectionedCsvTests(unittest.TestCase):
         # 1 TX event + 2 DISC nodes
         self.assertEqual(len(rows), 3)
         self.assertEqual([r["node_id"] for r in rows], ["0CE8", "910E", "0CE8"])
-        self.assertEqual([r["snr"] for r in rows], [-0.25, -6.0, 1.25])
+        self.assertTrue(all("snr" not in r for r in rows))  # dropped from the wire record
 
     def test_disc_repeater_marker_maps_to_repeater(self):
         rows = heimdall.parse_meshmapper_csv(self.path)
@@ -152,18 +151,18 @@ class OfflineJsonTests(unittest.TestCase):
         self.assertEqual(rows[0]["node_id"], "0CE8")
         self.assertEqual(rows[1]["node_id"], "FB03")
 
-    def test_disc_carries_real_rssi_and_snr(self):
+    def test_disc_carries_real_rssi(self):
         rows = heimdall.parse_offline_json(self.path)
         disc = rows[0]
         self.assertEqual(disc["rssi"], -98.0)
-        self.assertEqual(disc["snr"], 2.25)
+        self.assertNotIn("snr", disc)  # dropped from the wire record
         self.assertEqual(disc["node_type"], "REPEATER")
         self.assertEqual(disc["type"], "MESHCORE")
 
-    def test_rx_token_has_snr_but_no_rssi(self):
+    def test_rx_token_has_no_rssi(self):
         rows = heimdall.parse_offline_json(self.path)
         rx = rows[1]
-        self.assertEqual(rx["snr"], -8.0)
+        self.assertNotIn("snr", rx)  # dropped from the wire record
         self.assertIsNone(rx["rssi"])
 
     def test_epoch_timestamp_becomes_first_seen(self):
@@ -183,12 +182,12 @@ class NodeTokenTests(unittest.TestCase):
         self.assertEqual(rec["node_id"], "910E")
         self.assertEqual(rec["node_type"], "REPEATER")
         self.assertEqual(rec["type"], "MESHCORE")
-        self.assertEqual(rec["snr"], -6.0)
+        self.assertNotIn("snr", rec)  # dropped from the wire record
 
     def test_tx_token_without_marker(self):
         rec = heimdall._node_token_to_record("0CE8(-0.25)", "t", 0.0, 0.0)
         self.assertEqual(rec["node_id"], "0CE8")
-        self.assertEqual(rec["snr"], -0.25)
+        self.assertNotIn("snr", rec)  # dropped from the wire record
 
     def test_garbage_token_returns_none(self):
         self.assertIsNone(heimdall._node_token_to_record("", "t", 0.0, 0.0))

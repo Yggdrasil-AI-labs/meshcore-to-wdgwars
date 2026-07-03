@@ -4,6 +4,30 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] - Drop blank `name` and unrecognised `snr` from meshcore records
+
+v0.4.2 fixed the `type`/`node_type` swap, but a live re-test (@nicolasrata,
+2026-07-03) still came back `meshcore_imported: 0` — unchanged from before
+the fix, which means something else is also wrong. Two more differences
+from the one confirmed-working record on file:
+
+- Heimdall always sent `"name": ""` (MeshMapper exports carry no name
+  field). The confirmed-working record had a real, non-empty name — a
+  blank required field is a plausible reason a schema-correct-looking
+  record still gets silently dropped.
+- Heimdall sent an extra `snr` field not present in the confirmed shape.
+  An unrecognised extra key is another plausible silent-drop cause.
+
+`name` now falls back to `node_id` when there's nothing better; `snr` is
+dropped from the wire record entirely (still computed internally, just
+not sent). Like v0.4.2, **this has not been confirmed against a live
+upload** — it's the next best-evidenced guess, not a verified fix.
+
+### Fixed
+
+- `_build_record()` defaults `name` to `node_id` instead of `""`.
+- `_build_record()` no longer includes `snr` in the emitted record.
+
 ## [0.4.2] - Fix the meshcore record schema: every upload was silently dropped
 
 Every meshcore upload attempt on record — two different real MeshMapper

@@ -10,7 +10,7 @@ Target schema (`type` is the constant envelope marker; the node's own role
 goes in the separate `node_type` field — earlier releases swapped these two
 and had every upload accepted with meshcore_imported: 0):
 
-    node_id, node_type, name, lat, lon, rssi, snr, first_seen, type
+    node_id, node_type, name, lat, lon, rssi, first_seen, type
 
 License: MIT
 """
@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
@@ -50,7 +50,7 @@ SCHEDULE_MARKER = "managed-by-heimdall"
 SYSTEMD_UNIT_NAME = "heimdall"  # .service + .timer share this stem
 WINDOWS_TASK_NAME = "Heimdall"
 DEFAULT_SCHEDULE_TIME = "03:00"
-TARGET_FIELDS = ("node_id", "node_type", "name", "lat", "lon", "rssi", "snr",
+TARGET_FIELDS = ("node_id", "node_type", "name", "lat", "lon", "rssi",
                   "first_seen", "type")
 
 MESHMAPPER_RX_HEADERS = (
@@ -134,15 +134,23 @@ def _build_record(node_id: str, node_type: str, name: str,
                   snr: float | None, timestamp: str) -> dict[str, Any]:
     """Assemble one meshcore_nodes record in the confirmed wdgwars.pl wire
     shape (`type` is the constant envelope marker, `node_type` carries the
-    node's actual role, the date field is `first_seen`)."""
+    node's actual role, the date field is `first_seen`).
+
+    `name` falls back to `node_id` rather than an empty string: the one
+    confirmed-working record on file always had a real name, MeshMapper
+    exports never do, and a blank required field is a plausible reason a
+    schema-correct-looking record still gets silently dropped. `snr` is
+    accepted as a parameter but deliberately dropped from the record: it
+    wasn't present in the confirmed-working shape, and an unrecognised
+    extra key is another plausible silent-drop cause. Revisit both once
+    wdgwars.pl confirms which (if either) actually mattered."""
     return {
         "node_id": node_id,
         "node_type": node_type.upper(),
-        "name": name,
+        "name": name or node_id,
         "lat": lat,
         "lon": lon,
         "rssi": rssi,
-        "snr": snr,
         "first_seen": _format_first_seen(timestamp),
         "type": MESHCORE_ENVELOPE_TYPE,
     }

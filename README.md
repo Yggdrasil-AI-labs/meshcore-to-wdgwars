@@ -311,7 +311,7 @@ envelope  = {"data": data_b64, "nonce": nonce, "sig": sig}
 # POST → https://wdgwars.pl/api/upload/ with X-API-Key: <key>
 ```
 
-The target per-record schema is `node_id, node_type, name, lat, lon, rssi, snr, first_seen, type`. `type` is a constant (`"MESHCORE"`) marking the record as part of this envelope family; the node's own role (repeater/client/...) goes in `node_type`. Field aliases for MeshMapper inputs are in `_normalise_meshmapper_row`.
+The target per-record schema is `node_id, node_type, name, lat, lon, rssi, first_seen, type`. `type` is a constant (`"MESHCORE"`) marking the record as part of this envelope family; the node's own role (repeater/client/...) goes in `node_type`. `name` falls back to `node_id` when the source format has no real name (MeshMapper never does). Field aliases for MeshMapper inputs are in `_normalise_meshmapper_row`.
 
 ---
 
