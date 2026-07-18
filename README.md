@@ -42,7 +42,7 @@ Heimdall ships in **two flavours** that share the same parsing core. Both are li
 
 If you're on a Raspberry Pi, a server, or anything without a desktop, **use the CLI**. Scroll down to [CLI install](#cli-install).
 
-The web version lives at [hiroalleycat.github.io/meshcore-to-wdgwars](https://hiroalleycat.github.io/meshcore-to-wdgwars/).
+The web version lives at [yggdrasil-ai-labs.github.io/meshcore-to-wdgwars](https://yggdrasil-ai-labs.github.io/meshcore-to-wdgwars/).
 
 ---
 
@@ -228,7 +228,7 @@ Italicised rows are not yet implemented — they are on the roadmap once sample 
 | `--version` | Print version and exit. | (none) |
 | `-h`, `--help` | Print help and exit. | (none) |
 
-**Deprecated aliases:** `--api-key` (use `--key`) and `--endpoint` (use `--api-url`) still work for now but will be removed in `v0.4`. Both emit a one-line deprecation note on stderr when used.
+**Deprecated aliases:** `--api-key` (use `--key`) and `--endpoint` (use `--api-url`) still work for now but will be removed in a future release. Both emit a one-line deprecation note on stderr when used.
 
 ### Examples
 
@@ -271,8 +271,7 @@ Records batch in chunks of **1000** per request.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `ModuleNotFoundError: No module named 'gungnir'` | Ran `python3 heimdall.py ...` directly instead of `./run.sh` — system Python doesn't see the venv. | Use `./run.sh ...` (it picks `.venv/bin/python` automatically) or activate the venv yourself: `source .venv/bin/activate`. |
-| `[heimdall] note: --api-key is deprecated, use --key.` | You're on a fresh `v0.3.0+` with old shell history / docs. | Rename the flag — both still work today, but `--api-key` disappears in `v0.4`. |
+| `[heimdall] note: --api-key is deprecated, use --key.` | You're on a fresh `v0.3.0+` with old shell history / docs. | Rename the flag — both still work today, but `--api-key` will be dropped in a future release. |
 | `--schedule needs --schedule-csv PATH` | The scheduler needs a fixed CSV file path to upload daily. | Pick a path you keep refreshing (your nightly MeshMapper export) and pass it: `./run.sh --schedule --schedule-csv /path/to/file.csv`. |
 | `--schedule needs a saved WDGoWars API key` | The installed timer reads the saved key at run-time; you haven't saved one yet. | Run `./run.sh --setup` first, then re-run `--schedule`. |
 | Daily upload runs but nothing appears on WDGoWars | The schedule was installed with `--schedule-dry-run`. | Re-run `--schedule` without `--schedule-dry-run` to go live. |
@@ -318,7 +317,7 @@ The target per-record schema is `node_id, node_type, name, lat, lon, rssi, first
 ## Privacy & data flow
 
 - Capture files **never leave your machine** until you explicitly run an upload command without `--dry-run`. Parsing, normalising, and envelope-building all happen locally.
-- The API key is read from `--api-key`, then `$WDGWARS_API_KEY`, then the saved key file. When `--setup` (or `--save-key`) writes the file, it's `chmod 0600` on Unix and lives under the per-user `%APPDATA%` on Windows.
+- The API key is read from `--key` (or the deprecated `--api-key` alias), then `$WDGWARS_API_KEY`, then the saved key file. When `--setup` (or `--save-key`) writes the file, it's `chmod 0600` on Unix and lives under the per-user `%APPDATA%` on Windows.
 - The bundled `examples/sample.csv` is a **scrubbed** export with `lat=0, lon=0` for every row, so it cannot accidentally produce a real upload (the upstream ingest rejects `0,0` GPS).
 - The daily version check hits `https://api.github.com/repos/Yggdrasil-AI-labs/meshcore-to-wdgwars/releases/latest` with a `heimdall/<version>` User-Agent, caches the answer for 24h, and sends nothing about you or your data. Disable per-run with `--no-version-check`, or silence globally with `--quiet`.
 - No telemetry, no analytics. The only outbound traffic is to the WDGoWars upload endpoint (when you explicitly invoke an upload) and the GitHub release check (cached daily, opt-out via `--no-version-check`).

@@ -14,7 +14,7 @@ if errorlevel 1 (
 )
 
 echo [1/3] Refreshing requirements.txt from GitHub...
-python -c "import urllib.request as u; u.urlretrieve('https://raw.githubusercontent.com/HiroAlleyCat/meshcore-to-wdgwars/main/requirements.txt', r'%~dp0requirements.txt')"
+python -c "import urllib.request as u; u.urlretrieve('https://raw.githubusercontent.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/main/requirements.txt', r'%~dp0requirements.txt')"
 if errorlevel 1 (
     echo.
     echo Could not fetch requirements.txt. Check internet connection and

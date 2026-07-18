@@ -2,37 +2,44 @@
 
 ## What this tool does
 
-- Reads a local CSV file (your MeshMapper export, or a sibling format
-  once those land).
+- Reads a local CSV or JSON file (your MeshMapper export or MeshCore
+  offline ping log).
 - Normalises each row to the WDGoWars meshcore schema.
 - Optionally POSTs the records to `https://wdgwars.pl/api/upload/` as
   an HMAC-signed JSON envelope.
+- Optionally checks GitHub's releases API for a newer version (see
+  below) and self-updates on request.
 
-That's the whole footprint of the v0.1.0 CLI.
+## Outbound network footprint
 
-## What this tool **does not** do
-
-- ❌ **No telemetry or analytics.** The only outbound traffic is to
-  `https://wdgwars.pl/api/upload/`, and only when you invoke an upload
-  command without `--dry-run`. Override the endpoint with `--endpoint`.
-- ❌ **No version-check, no auto-update.** Heimdall does not phone home,
-  not even to GitHub's releases API. (Muninn has an opt-out daily HEAD
-  to releases for update notifications; Heimdall may add the same later,
-  with the same opt-out, but does not today.)
+- **Uploads** go only to the configured WDGoWars endpoint
+  (`https://wdgwars.pl/api/upload/` by default, override with
+  `--api-url`), and only when you invoke an upload without `--dry-run`.
+- **Version check**: at most once per 24 h Heimdall queries GitHub's
+  releases API to nudge you about a newer release. Cached in the config
+  dir, 3 s timeout, never blocks an upload. Opt out with
+  `--no-version-check` or `--quiet`.
+- **Self-update** (`--update`, or the `update.sh`/`update.bat`
+  wrappers): fetches `heimdall.py`, `requirements.txt`, and the wrapper
+  scripts from this repo's `main` branch on raw.githubusercontent.com
+  over HTTPS. The downloaded script is AST-parsed before it atomically
+  replaces the old one. This is an explicit, operator-invoked action —
+  nothing updates itself in the background.
+- **No telemetry or analytics.** Nothing else leaves the machine.
 - ❌ **No `eval`, `exec`, `os.system`, or `shell=True` subprocess calls.**
-  No command-injection paths.
-- ❌ **No remote code download/execution.** Pure stdlib Python; nothing
-  is pulled from PyPI or any other index at runtime.
-- ❌ **No data sent anywhere except the configured WDGoWars endpoint
-  when you explicitly opt in.**
+  Subprocesses (git/pip/systemctl/crontab/schtasks in `--update` and the
+  scheduler installers) run with argument lists, never through a shell.
 
 ## API key handling
 
-- Resolution: `--api-key` flag → `$WDGWARS_API_KEY` env var.
-- The key is **not persisted to disk** in v0.1.0. Every invocation
-  re-reads it. A future `--save-key` flag (mirroring Muninn) will
-  introduce persistence with `mode 0600` and symlink-refusal, same
-  shape as Muninn's `~/.config/muninn/api.key`.
+- Resolution: `--key` flag → `$WDGWARS_API_KEY` env var → saved key file
+  (`~/.config/heimdall/api.key`, `%APPDATA%\heimdall\api.key` on
+  Windows). `--api-key` survives only as a hidden deprecated alias.
+- `--setup` / `--save-key` persist the key with `mode 0600`, an atomic
+  create, and symlink refusal — same shape as Muninn's
+  `~/.config/muninn/api.key`.
+- The key never appears in scheduler unit files, cron lines, or task
+  definitions — scheduled runs re-read the saved key file at run time.
 - The key is sent over HTTPS only, in the `X-API-Key` request header
   to `wdgwars.pl`. The TLS context is Python's `ssl.create_default_context()`
   default — system trust store, hostname verification on, TLS 1.2+.

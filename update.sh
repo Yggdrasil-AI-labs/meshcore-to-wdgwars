@@ -32,7 +32,7 @@ fi
 VENV_PY="$VENV_DIR/bin/python"
 
 echo "[1/3] Refreshing requirements.txt from GitHub..."
-"$VENV_PY" -c "import urllib.request as u; u.urlretrieve('https://raw.githubusercontent.com/HiroAlleyCat/meshcore-to-wdgwars/main/requirements.txt', 'requirements.txt')"
+"$VENV_PY" -c "import urllib.request as u; u.urlretrieve('https://raw.githubusercontent.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/main/requirements.txt', 'requirements.txt')"
 
 echo
 echo "[2/3] Installing/refreshing dependencies..."

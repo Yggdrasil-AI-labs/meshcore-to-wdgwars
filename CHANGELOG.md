@@ -4,6 +4,42 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.5] - 2026-07-18 - Wrapper-refreshing --update + org migration
+
+### Fixed
+
+- **`--update` now refreshes the six wrapper scripts** (`run`/`setup`/
+  `update` `.sh`/`.bat`) on the raw-download (ZIP install) path, closing the
+  family bug where a fix living in a wrapper could never reach ZIP-installed
+  users through self-update. The list is hard-coded — not a remote
+  manifest — so the update path can never be steered into writing arbitrary
+  filenames. Wrapper download failures warn and continue; deleted wrappers
+  are respected; `.sh` wrappers get their exec bit restored on POSIX.
+  Covered by `tests/test_update_wrappers.py`. Same implementation shape as
+  Muninn / wigle-to-wdgwars modulo naming.
+- **Org migration completed in code**: `GITHUB_REPO` (drives `--update`, the
+  daily version check, and the User-Agent) and the raw-GitHub URLs in all
+  four setup/update wrappers now point at `Yggdrasil-AI-labs` instead of
+  surviving on GitHub's rename redirect from the old `HiroAlleyCat` owner.
+  README's web-flavor link now points at
+  `yggdrasil-ai-labs.github.io/meshcore-to-wdgwars`.
+- **Docs told the truth again**: SECURITY.md's v0.1.0-era claims ("no
+  version-check, no auto-update", "key is not persisted to disk",
+  `--api-key`/`--endpoint` as current names) were contradicted by shipped
+  behavior since v0.3.0 and are rewritten to match reality. README no longer
+  documents an impossible `No module named 'gungnir'` error (Heimdall is
+  pure stdlib), no longer promises alias removal "in v0.4" (they still ship;
+  removal is now "a future major release"), and the privacy section names
+  `--key`. The tests/__init__.py comment falsely claiming a gungnir
+  dependency is fixed. The module docstring now records *why* Heimdall is
+  the only family member with inlined transport (2026-06-03 decision).
+
+### Removed
+
+- Dead constants `TARGET_FIELDS` and `MESHMAPPER_RX_HEADERS` (defined,
+  never referenced). `_normalise_meshmapper_row`'s docstring no longer
+  lists `snr` in the wire schema (dropped from the wire in v0.4.3).
+
 ## [0.4.4] - Lower-case node_id; surface wdgwars.pl's new reject reasons
 
 LOCOSP confirmed (2026-07-03, mod-reports) the actual cause behind v0.4.2
@@ -142,9 +178,11 @@ on both.
   offline-JSON `DISC` pings have a real RSSI. Node-type markers other than
   `(R)` (repeater) are normalised to the default pending a confirmed sample.
 
-## [Unreleased] - CI quality gates + security review
+## CI quality gates + security review (tooling-only, landed unversioned mid-0.4.x)
 
 Tooling and CI only — no change to `heimdall.py` behavior, so no version bump.
+(Header renamed from "[Unreleased]" in v0.4.5: the work has long been on
+`main` and this section's mid-file position kept confusing changelog reads.)
 
 Brings Heimdall onto the same gated CI pipeline as the sibling
 adsb-to-wdgwars (Muninn) and wigle-to-wdgwars repos: pytest + coverage →

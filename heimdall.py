@@ -6,6 +6,15 @@ Sibling of Muninn (adsb-to-wdgwars). Same HMAC envelope, same /api/upload/
 endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills
 `meshcore_nodes`.
 
+Transport note: Heimdall is deliberately the only family member that
+inlines its HMAC envelope/transport (pure stdlib) instead of depending on
+the shared gungnir library. It ships as both a CLI and a Pyodide browser
+page from this single file, and zero runtime dependencies keeps the web
+flavor's bundle trivial. The 2026-06-03 family audit weighed extracting to
+gungnir (the historical `v0.2-gungnir` branch is dead, unmergeable
+history) and decided to keep the inline transport; transport fixes that
+land in gungnir must be ported here by hand.
+
 Target schema (`type` is the constant envelope marker; the node's own role
 goes in the separate `node_type` field — earlier releases swapped these two
 and had every upload accepted with meshcore_imported: 0):
@@ -38,8 +47,8 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.4.4"
-GITHUB_REPO = "HiroAlleyCat/meshcore-to-wdgwars"
+__version__ = "0.4.5"
+GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
 ME_API_URL = "https://wdgwars.pl/api/me"
@@ -50,13 +59,6 @@ SCHEDULE_MARKER = "managed-by-heimdall"
 SYSTEMD_UNIT_NAME = "heimdall"  # .service + .timer share this stem
 WINDOWS_TASK_NAME = "Heimdall"
 DEFAULT_SCHEDULE_TIME = "03:00"
-TARGET_FIELDS = ("node_id", "node_type", "name", "lat", "lon", "rssi",
-                  "first_seen", "type")
-
-MESHMAPPER_RX_HEADERS = (
-    "timestamp", "repeater_id", "snr", "rssi", "path_length",
-    "header", "latitude", "longitude", "path_hops",
-)
 
 # Every record in the meshcore_nodes envelope carries a constant `type` —
 # it marks the record as belonging to this envelope family, mirroring how
@@ -418,8 +420,9 @@ def _normalise_meshmapper_row(row: dict[str, str]) -> dict[str, Any] | None:
     MeshMapper "Copy CSV" header:
         timestamp,repeater_id,snr,rssi,path_length,header,latitude,longitude,path_hops
 
-    Target schema:
-        node_id,node_type,name,lat,lon,rssi,snr,first_seen,type
+    Target schema (snr is parsed for validation but dropped from the wire
+    since v0.4.3):
+        node_id,node_type,name,lat,lon,rssi,first_seen,type
 
     Returns None for rows missing required fields or with unparseable numerics.
     Paste-damaged rows skip silently this way.
@@ -794,6 +797,36 @@ def _fetch_raw(path: str, dest: Path) -> bool:
     return True
 
 
+WRAPPER_SCRIPTS = ("run.sh", "run.bat", "setup.sh", "setup.bat",
+                   "update.sh", "update.bat")
+
+
+def _refresh_wrappers(script_dir: Path) -> None:
+    """Refresh the shell/batch wrapper scripts next to heimdall.py.
+
+    ZIP-installed users only receive wrapper fixes through --update (git
+    checkouts get them via `git pull`), so the raw-update path must ship
+    them too. The list is hard-coded rather than fetched from a remote
+    manifest so the update path can never be steered into writing
+    arbitrary filenames. A wrapper that fails to download is skipped
+    with a warning — the heimdall.py update is never rolled back over a
+    wrapper. Wrappers the user deleted are respected and not re-planted.
+    """
+    for name in WRAPPER_SCRIPTS:
+        dest = script_dir / name
+        if not dest.exists():
+            continue
+        if not _fetch_raw(name, dest):
+            print(f"[heimdall] wrapper {name} not refreshed; re-download "
+                  f"the release archive if it stays broken.", file=sys.stderr)
+            continue
+        if os.name == "posix" and name.endswith(".sh"):
+            try:
+                os.chmod(dest, 0o755)
+            except OSError:
+                pass
+
+
 def _pip_install_requirements(script_dir: Path) -> None:
     """Best-effort `python -m pip install -r requirements.txt` against the
     interpreter currently running heimdall. Never fails the caller — prints
@@ -870,8 +903,10 @@ def _update_from_raw(script_dir: Path) -> int:
     new_version = m.group(1) if m else "?"
     if new_version == __version__:
         print(f"[heimdall] already on the latest (v{__version__}). Refreshing "
-              f"requirements.txt in case a pinned dep moved.", file=sys.stderr)
+              f"requirements.txt and wrappers in case a pinned dep or "
+              f"wrapper fix moved.", file=sys.stderr)
         _fetch_raw("requirements.txt", script_dir / "requirements.txt")
+        _refresh_wrappers(script_dir)
         _pip_install_requirements(script_dir)
         return 0
     tmp = target.with_suffix(".py.new")
@@ -887,6 +922,7 @@ def _update_from_raw(script_dir: Path) -> int:
         return 1
     print(f"[heimdall] updated v{__version__} to v{new_version}", file=sys.stderr)
     _fetch_raw("requirements.txt", script_dir / "requirements.txt")
+    _refresh_wrappers(script_dir)
     _pip_install_requirements(script_dir)
     print(f"[heimdall] re-run heimdall to pick up the new code "
           f"(the current process is still running the old version).",
@@ -1253,9 +1289,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="validate your stored API key by hitting /api/me and "
                         "showing account stats; exits after.")
     # --key is the canonical name (matches Muninn + wigle-to-wdgwars).
-    # --api-key is the legacy name; kept as a deprecated alias for one
-    # release. Drop in v0.4 unless the operator extends the deprecation
-    # window. The actual value lands on args.key after the merge below.
+    # --api-key is the legacy name; kept as a deprecated alias. Removal
+    # was slated for v0.4 but deliberately slipped — drop it in the next
+    # major once the operator confirms no schedulers still pass it. The
+    # actual value lands on args.key after the merge below.
     p.add_argument("--key", help="WDGoWars API key (or set WDGWARS_API_KEY, "
                                  "or run --setup once to save it)")
     p.add_argument("--api-key", dest="api_key_legacy",
@@ -1296,7 +1333,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Deprecated-flag back-compat ──
     # If the user passed --api-key, hoist it onto args.key (with a warning).
-    # Same for --endpoint -> --api-url. Both old names disappear in v0.4.
+    # Same for --endpoint -> --api-url. Both old names go in the next major.
     if args.api_key_legacy is not None:
         if args.key is None:
             args.key = args.api_key_legacy
