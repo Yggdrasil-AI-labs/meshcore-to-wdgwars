@@ -822,7 +822,10 @@ def _refresh_wrappers(script_dir: Path) -> None:
             continue
         if os.name == "posix" and name.endswith(".sh"):
             try:
-                os.chmod(dest, 0o755)
+                # Owner-only exec: the wrapper belongs to the operator who
+                # installed the tool; granting group/other nothing keeps
+                # SonarCloud S2612 quiet and loses no functionality.
+                os.chmod(dest, 0o700)
             except OSError:
                 pass
 

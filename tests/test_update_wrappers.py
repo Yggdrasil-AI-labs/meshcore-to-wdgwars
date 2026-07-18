@@ -67,7 +67,7 @@ class RefreshWrappersTests(unittest.TestCase):
                  mock.patch("os.chmod") as chmod, \
                  mock.patch("sys.stderr", new=io.StringIO()):
                 heimdall._refresh_wrappers(root)
-        chmod.assert_called_once_with(expected_sh, 0o755)
+        chmod.assert_called_once_with(expected_sh, 0o700)
 
     def test_wrapper_list_is_the_full_six_pack(self) -> None:
         """The hard-coded list must cover every shipped wrapper, or the
