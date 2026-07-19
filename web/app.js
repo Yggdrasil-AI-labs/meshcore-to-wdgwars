@@ -108,6 +108,18 @@ json.dumps({"records": records, "format": fmt})
   }
 
   const parsed = JSON.parse(result);
+  // Collapse repeat sightings of the same node before anything downstream:
+  // wdgwars.pl dedupes by node_id anyway (repeats come back as
+  // "already_seen"), so keep the first sighting per node_id and spare the
+  // payload the extra rows.
+  const sightings = parsed.records.length;
+  const seenIds = new Set();
+  parsed.records = parsed.records.filter(r => {
+    if (!r.node_id) return true;
+    if (seenIds.has(r.node_id)) return false;
+    seenIds.add(r.node_id);
+    return true;
+  });
   if (!parsed.records.length) {
     setStatus(
       `No meshcore nodes found in ${file.name}. ` +
@@ -125,21 +137,28 @@ json.dumps({"records": records, "format": fmt})
     format: parsed.format,
   };
 
-  // Build a dump1090-fa-shaped download payload — same envelope shape
-  // as the upload, useful for offline inspection.
+  // Build the download payload: the unsigned {networks, aircraft,
+  // meshcore_nodes} envelope that /api/upload/ expects inside its signed
+  // "data" field. This is an API payload, not a dump1090-fa file and not
+  // a format wdgwars.pl's website upload form is confirmed to accept
+  // (that form takes WiGLE CSV and dump1090-fa aircraft JSON).
   lastPayload.web = {
     "networks": [],
     "aircraft": [],
     "meshcore_nodes": parsed.records,
   };
 
-  renderResults(parsed, file.name);
+  renderResults(parsed, file.name, sightings);
 }
 
-function renderResults(parsed, filename) {
+function renderResults(parsed, filename, sightings) {
   const n = parsed.records.length;
+  const dupPill = sightings > n
+    ? `<span class="pill">${sightings - n} repeat sightings collapsed</span>`
+    : "";
   summaryEl.innerHTML =
     `<span class="pill ok">${n} meshcore nodes</span>` +
+    dupPill +
     `<span class="pill">format: ${parsed.format}</span>` +
     `<span class="pill">${filename}</span>`;
 
@@ -288,8 +307,10 @@ json.dumps({"data": _data_b64, "nonce": _nonce, "sig": _sig})
     if (looksLikeCors && !apiurlEl.value.startsWith("/")) {
       setUploadStatus(
         "Direct upload blocked by the WDG server's CORS policy. " +
-        "Click 'Download JSON' and upload via wdgwars.pl, or run Heimdall " +
-        "self-hosted (see docs for the local-proxy setup).",
+        "Use the CLI with your API key, or run Heimdall self-hosted " +
+        "(see docs for the serve.py local-proxy setup). The downloaded " +
+        "JSON is an API payload; wdgwars.pl's website upload form is not " +
+        "confirmed to accept it.",
         "warn",
       );
     } else {

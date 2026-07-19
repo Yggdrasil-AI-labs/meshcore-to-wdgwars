@@ -4,6 +4,30 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.6] - 2026-07-19 - Web flavour stops pointing players at the website upload form
+
+### Fixed
+
+- **The web copy no longer tells players to drag the downloaded JSON into
+  wdgwars.pl's website upload form.** The download is the unsigned
+  `/api/upload/` payload envelope (`{networks, aircraft, meshcore_nodes}`);
+  the website form is only confirmed to accept WiGLE CSV and dump1090-fa
+  aircraft JSON, so meshcore JSON gets a parse error there (player report,
+  2026-07-19). The "Next step" hint, web/README.md's public-deploy section,
+  and the CORS fallback message now point at the CLI direct upload (API key)
+  or a self-hosted `serve.py` proxy instead, until LOCOSP confirms
+  website-form support for meshcore JSON.
+- The app.js comment that mislabeled the download payload as
+  "dump1090-fa-shaped" now describes the actual envelope.
+
+### Changed
+
+- **The web flavour collapses repeat sightings of the same `node_id`**
+  (first sighting wins, matching the server's own dedupe) before preview,
+  download, and direct upload. The summary now shows how many repeat
+  sightings were collapsed. CLI behavior is unchanged; the server already
+  reports repeats as `already_seen` on that path.
+
 ## [0.4.5] - 2026-07-18 - Wrapper-refreshing --update + org migration
 
 ### Fixed

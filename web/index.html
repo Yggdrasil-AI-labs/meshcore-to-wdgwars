@@ -473,7 +473,7 @@
       </label>
     </div>
     <div class="hint" id="player-hint">
-      <strong style="color:var(--cyan)">Next step:</strong> click <em>Download JSON</em>, then drag the file into the upload form on <a href="https://wdgwars.pl" target="_blank" rel="noopener">wdgwars.pl</a>. <span class="self-hosted-only">Direct API upload is also available — click <em>Direct upload (API)</em> with your key set in the panel below.</span><span class="public-only">Power users: the <a href="https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars" target="_blank" rel="noopener">CLI</a> can upload directly via HMAC, and a self-hosted Heimdall (with the included <code>serve.py</code> proxy) gets browser-side direct upload too.</span>
+      <strong style="color:var(--cyan)">Next step:</strong> <span class="self-hosted-only">click <em>Direct upload (API)</em> with your key set in the panel below. <em>Download JSON</em> saves the same API payload for later or scripted upload.</span><span class="public-only">the downloaded JSON is Heimdall's payload for the WDGoWars <code>/api/upload/</code> API, not a file for the upload form on wdgwars.pl (that form is only confirmed to accept WiGLE CSV and dump1090-fa aircraft JSON, so meshcore JSON gets a parse error there). To put your nodes on the map, use the <a href="https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars" target="_blank" rel="noopener">CLI</a> with an API key (run <code>python3 heimdall.py --setup</code> once, then <code>python3 heimdall.py yourfile.csv</code>), or self-host this page with the included <code>serve.py</code> proxy to enable browser-side direct upload.</span>
     </div>
     <div class="status" id="upload-status" style="margin-top:12px"></div>
     <pre id="dry-output" class="dry-output"></pre>
@@ -497,6 +497,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
-<script type="module" src="./app.js?v=0.1.0"></script>
+<script type="module" src="./app.js?v=0.1.1"></script>
 </body>
 </html>

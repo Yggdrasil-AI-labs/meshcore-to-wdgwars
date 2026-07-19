@@ -59,8 +59,21 @@ over loopback and then to `wdgwars.pl` server-to-server.
 
 When the site is served from `*.github.io`, the upload UI is hidden
 entirely (button, dry-run toggle, uplink config). The page becomes a
-pure converter: drop → preview → download. Players take the downloaded
-JSON to wdgwars.pl's normal upload form.
+pure converter: drop → preview → download.
+
+The downloaded file is Heimdall's API payload (the unsigned
+`{networks, aircraft, meshcore_nodes}` envelope that `/api/upload/`
+expects inside its signed `data` field), **not** a file for
+wdgwars.pl's website upload form. That form is only confirmed to
+accept WiGLE CSV and dump1090-fa aircraft JSON; dropping meshcore
+JSON into it produces a parse error (player report, 2026-07-19).
+Until LOCOSP confirms website-form support for meshcore JSON, the
+two working routes onto the map are:
+
+- **CLI with an API key**: `python3 heimdall.py --setup` once, then
+  `python3 heimdall.py yourfile.csv`
+- **Self-hosted deploy with the `serve.py` proxy** (section above),
+  which enables the in-browser direct-upload button
 
 ## Keeping `web/heimdall.py` in sync
 
