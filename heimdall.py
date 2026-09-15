@@ -2,7 +2,7 @@
 """
 heimdall.py. MeshMapper CSV to WDGWars meshcore_nodes uplink.
 
-Sibling of Muninn (adsb-to-wdgwars). Same HMAC envelope, same /api/upload/
+Sibling of Muninn (adsb-to-wdgwars). Same HMAC envelope, same /endpoint/upload/
 endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills
 `meshcore_nodes`.
 
@@ -54,11 +54,18 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
-DEFAULT_ENDPOINT = "https://wdgwars.pl/api/upload/"
-ME_API_URL = "https://wdgwars.pl/api/me"
+# /endpoint/* is the server-side alias of /api/*: same router, same HMAC
+# envelope, same response. It sits outside the /api/* pattern Cloudflare's
+# L7 shield gates during an event, which is when a feeder most needs both
+# calls to work. Muninn's shared transport (gungnir) moved uploads in
+# v0.1.2 and key validation in v0.1.6; Heimdall carries its own constants,
+# so it follows here. Both paths were confirmed to answer identically
+# (2026-09-15). Override the upload URL with --api-url.
+DEFAULT_ENDPOINT = "https://wdgwars.pl/endpoint/upload/"
+ME_API_URL = "https://wdgwars.pl/endpoint/me"
 BATCH_SIZE = 1000
 
 # ── Scheduler constants ─────────────────────────────────────────────────────
@@ -283,7 +290,7 @@ def _build_record(node_id: str, node_type: str, name: str,
     than an empty string: MeshMapper exports never carry a real name.
 
     `node_id` itself is lower-cased: wdgwars.pl confirmed (2026-07-03) that
-    `/api/upload/`'s meshcore ingest gates every node on a real GPS fix, a
+    `/endpoint/upload/`'s meshcore ingest gates every node on a real GPS fix, a
     node_id that is 8-16 *lowercase* hex, and a known node_type, silently
     dropping anything that misses. MeshMapper's real node IDs are uppercase
     (e.g. "0CE8"), so this was one guaranteed rejection. The *length* gate
@@ -543,11 +550,11 @@ def _scrub(text: str, key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# /api/me whoami check
+# /endpoint/me whoami check
 # ---------------------------------------------------------------------------
 
 def check_whoami(key: str) -> int:
-    """Hit /api/me to validate the key. Prints username + counts on success.
+    """Hit /endpoint/me to validate the key. Prints username + counts on success.
     Never echoes the API key in any output, even on failure."""
     req = urllib.request.Request(
         ME_API_URL,
@@ -620,7 +627,7 @@ def _prompt_yes_no(question: str, default: bool = True) -> bool:
 
 def interactive_setup() -> int:
     """First-run setup. Asks yes/no whether to configure an API key, prompts
-    for it, validates against /api/me, and saves it on success.
+    for it, validates against /endpoint/me, and saves it on success.
     Returns 0 on success or skip, 1 on cancel."""
     print("", file=sys.stderr)
     print("-" * 60, file=sys.stderr)
@@ -668,7 +675,7 @@ def interactive_setup() -> int:
                   file=sys.stderr)
             continue
 
-        print(" Validating key against wdgwars.pl/api/me ...", file=sys.stderr)
+        print(" Validating key against wdgwars.pl/endpoint/me ...", file=sys.stderr)
         rc = check_whoami(key)
         if rc != 0:
             print(" That key was rejected. Try again, or Ctrl+C to cancel.\n",
@@ -1837,7 +1844,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="non-interactive: save the given API key to the user "
                         "config dir. Prefer --setup for first-time install.")
     p.add_argument("--whoami", action="store_true",
-                   help="validate your stored API key by hitting /api/me and "
+                   help="validate your stored API key by hitting /endpoint/me and "
                         "showing account stats; exits after.")
     # --key is the canonical name (matches Muninn + wigle-to-wdgwars).
     # --api-key is the legacy name; kept as a deprecated alias. Removal

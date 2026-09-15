@@ -12,7 +12,7 @@
 
 # Heimdall
 
-Convert **MeshMapper** "Logs → Copy CSV" exports (and other Meshcore LoRa capture formats, over time) to WDGWars-compatible JSON and optionally upload them. Sibling tool to [adsb-to-wdgwars](https://github.com/Yggdrasil-AI-labs/adsb-to-wdgwars) (Muninn); same HMAC envelope, same `/api/upload/` endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills `meshcore_nodes`.
+Convert **MeshMapper** "Logs → Copy CSV" exports (and other Meshcore LoRa capture formats, over time) to WDGWars-compatible JSON and optionally upload them. Sibling tool to [adsb-to-wdgwars](https://github.com/Yggdrasil-AI-labs/adsb-to-wdgwars) (Muninn); same HMAC envelope, same `/endpoint/upload/` endpoint, different payload slot. Muninn fills `aircraft`; Heimdall fills `meshcore_nodes`.
 
 **Scope:** Heimdall is for **Meshcore LoRa observations from your own captures**. WDGWars' mesh slot itself now takes both Meshcore and Meshtastic, told apart by an explicit `network` field rather than by guessing from role-name casing (LOCOSP, 2026-08-12). Heimdall's own parsers only read Meshcore capture formats, so what belongs in *this* tool is a Meshcore capture; Meshtastic support would be a separate feeder. If your data came from a real Meshcore receiver (MeshMapper app, T-Beam running Meshcore Companion, Cardputer ADV + LoRa cap, Heltec V3, etc.), you're in the right place. A sighting that hopped through other repeaters is still worth sending, tell WDGWars the hop count if your capture has one and it will never be rejected for being hopped, it will just be trusted less for that node's position than a sighting that arrived direct.
 
@@ -80,7 +80,7 @@ Generate a key just for Heimdall and give it a name, rather than reusing one you
 
 By configuring a key you're authorising Heimdall to upload the captures you give it to WDGWars under your own account. It won't ask again per upload. Use `--preview` or `--dry-run` to see exactly what would be sent before you commit to it.
 
-Walks you through pasting your WDGWars API key, validates it against `/api/me`, and saves it to:
+Walks you through pasting your WDGWars API key, validates it against `/endpoint/me`, and saves it to:
 
 | OS | Saved location |
 |---|---|
@@ -127,7 +127,7 @@ export WDGWARS_API_KEY=YOUR_KEY
 
 Records batch in chunks of **1000** per request.
 
-Want to confirm your saved key is good before running a real upload? `./run.sh --whoami` hits `/api/me` and prints your username + node counts.
+Want to confirm your saved key is good before running a real upload? `./run.sh --whoami` hits `/endpoint/me` and prints your username + node counts.
 
 ---
 
@@ -240,14 +240,14 @@ Italicised rows are not yet implemented. They are on the roadmap once sample dat
 | Flag | Purpose | Default |
 |---|---|---|
 | `csv` (positional) | Path to the MeshMapper CSV export. Optional with `--setup`, `--save-key`, `--whoami`, `--update`, `--schedule`, `--unschedule`. | (none) |
-| `--setup` | Interactive first-time setup. Prompts for your WDGWars API key, validates it against `/api/me`, and saves it to your user config dir. | off |
+| `--setup` | Interactive first-time setup. Prompts for your WDGWars API key, validates it against `/endpoint/me`, and saves it to your user config dir. | off |
 | `--save-key KEY` | Non-interactive: save the given API key to the user config dir. Prefer `--setup` for first-time install. | off |
-| `--whoami` | Validate your stored API key by hitting `/api/me` and printing username + node counts. | off |
+| `--whoami` | Validate your stored API key by hitting `/endpoint/me` and printing username + node counts. | off |
 | `--key KEY` | WDGWars API key. Overrides the `WDGWARS_API_KEY` env var and the saved key. Matches Muninn + wigle-to-wdgwars. | env / saved |
 | `--preview` | Parse the file, print the first six normalised rows as JSON, then exit. No envelope build, no upload. | off |
 | `--since-days N` | MeshCore app database only: skip nodes not heard in the last N days. The database is all-time, so without this an upload carries the whole back catalogue. Ignored (with a note) for other formats. | (all) |
 | `--dry-run` | Build the full HMAC-signed request envelope (same bytes the live upload would send), print a short summary per chunk, but do **not** POST. | off |
-| `--api-url URL` | Override the WDGWars upload URL. Matches Muninn. | `https://wdgwars.pl/api/upload/` |
+| `--api-url URL` | Override the WDGWars upload URL. Matches Muninn. | `https://wdgwars.pl/endpoint/upload/` |
 | `--schedule` | Install a daily scheduled upload. Pairs with `--schedule-csv PATH`. | off |
 | `--unschedule` | Remove every Heimdall-managed scheduled task on this host. | off |
 | `--schedule-csv PATH` | CSV file to upload daily. **Required** with `--schedule`. | (none) |
@@ -297,7 +297,7 @@ export WDGWARS_API_KEY=YOUR_KEY
 
 # Point at a self-hosted proxy (see web/serve.py)
 ./run.sh my-capture.csv \
-  --api-url http://127.0.0.1:8765/api/upload/
+  --api-url http://127.0.0.1:8765/endpoint/upload/
 ```
 
 Records batch in chunks of **1000** per request.
@@ -348,7 +348,7 @@ sig       = hmac.new(api_key.encode(),
                      (nonce + data_b64).encode(),
                      hashlib.sha256).hexdigest()
 envelope  = {"data": data_b64, "nonce": nonce, "sig": sig}
-# POST → https://wdgwars.pl/api/upload/ with X-API-Key: <key>
+# POST → https://wdgwars.pl/endpoint/upload/ with X-API-Key: <key>
 ```
 
 The target per-record schema is `node_id, node_type, name, lat, lon, rssi, first_seen, type, network`. `type` is a constant (`"MESHCORE"`) marking the record as part of this envelope family; `network` is a constant `"meshcore"`, the authoritative field WDGWars uses (since LOCOSP's 2026-08-12 contract) to tell Meshcore and Meshtastic apart, rather than inferring it from role-name casing. The node's own role (repeater/client/...) goes in `node_type`, sent exactly as the capture gave it, WDGWars keeps it verbatim and maps it onto its own internal set rather than asking feeders to translate. `name` carries the short on-air ID (`0CE8`) once `node_id` is derived from the node's public key, and otherwise falls back to `node_id` itself, since no MeshMapper format ever gives a node a real name. Three optional fields are added only when the capture actually supplied them, and omitted rather than sent as null otherwise: `public_key` (the node's full key), and `path_hops` / `path_length` (how many repeaters a sighting passed through). A hopped sighting is never rejected for being hopped, it can just never move a node's position ahead of one that arrived at least as directly. Field aliases for MeshMapper inputs are in `_normalise_meshmapper_row`; `node_id` derivation is in `derive_node_id`.

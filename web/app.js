@@ -26,7 +26,7 @@ const apiurlEl = $("apiurl");
 const versionPill = $("version-pill");
 
 apikeyEl.value = localStorage.getItem("heimdall.apikey") || "";
-apiurlEl.value = localStorage.getItem("heimdall.apiurl") || "https://wdgwars.pl/api/upload/";
+apiurlEl.value = localStorage.getItem("heimdall.apiurl") || "https://wdgwars.pl/endpoint/upload/";
 apikeyEl.addEventListener("change", () => localStorage.setItem("heimdall.apikey", apikeyEl.value));
 apiurlEl.addEventListener("change", () => localStorage.setItem("heimdall.apiurl", apiurlEl.value));
 
@@ -152,7 +152,7 @@ json.dumps({"records": records, "format": fmt})
   };
 
   // Build the download payload: the unsigned {networks, aircraft,
-  // meshcore_nodes} envelope that /api/upload/ expects inside its signed
+  // meshcore_nodes} envelope that /endpoint/upload/ expects inside its signed
   // "data" field. This is an API payload, not a dump1090-fa file and not
   // a format wdgwars.pl's website upload form is confirmed to accept
   // (that form takes WiGLE CSV and dump1090-fa aircraft JSON).

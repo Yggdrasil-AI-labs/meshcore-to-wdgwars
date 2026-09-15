@@ -4,6 +4,22 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-09-15 - Both calls move to /endpoint/*
+
+Heimdall was the last feeder in the family still calling `/api/*` for
+everything: the HMAC upload and the key validation. `/endpoint/*` is the
+server-side alias of the same router, same envelope, same response, and it
+sits outside the pattern Cloudflare's L7 shield gates during an event, which
+is exactly when a feeder still needs both calls to work. What a shield
+returns then, a 429 or a challenge, reads to the operator as a bad key rather
+than as a platform event.
+
+Both paths were confirmed to answer identically before the switch: `/api/me`
+and `/endpoint/me` returned byte-identical bodies for the same key, and GET
+on `/api/upload/` and `/endpoint/upload/` returned the same 405 envelope.
+`--api-url` still overrides the upload URL, and the web frontend's stored
+`heimdall.apiurl` wins over the new default for anyone who set one.
+
 ## [0.8.1] - 2026-08-14 - Fix: 0.8.0 killed the web frontend on import
 
 0.8.0 imported `sqlite3` at module top level. Pyodide **unvendors** `sqlite3`
