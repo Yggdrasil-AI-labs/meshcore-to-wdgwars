@@ -24,6 +24,15 @@ from unittest import mock
 
 import heimdall
 
+# CI installs no gungnir, deliberately: Heimdall's zero-dependency install
+# is the property the 2026-06-03 audit protects, and a CI run without the
+# library is what proves it still holds. So the gate's behaviour tests skip
+# there, while the tests that assert the gate stays OUT of the way always
+# run -- those are the ones that matter in exactly that environment.
+HAS_GUNGNIR = heimdall.holds_available()
+needs_gungnir = unittest.skipUnless(
+    HAS_GUNGNIR, "gungnir not installed; the gate is inactive here")
+
 
 def node(node_id: str, **kw):
     rec = {"node_id": node_id.lower(), "node_type": "client",
@@ -70,6 +79,7 @@ class LazyImportTests(unittest.TestCase):
                 self.assertIsNone(heimdall._holds())
 
 
+@needs_gungnir
 class FilterTests(unittest.TestCase):
     def setUp(self):
         self.now = time.time()
@@ -102,6 +112,7 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(heimdall.filter_already_sent([], self.now), ([], 0))
 
 
+@needs_gungnir
 class RecordTests(unittest.TestCase):
     def setUp(self):
         self.now = time.time()
@@ -138,6 +149,25 @@ class RecordTests(unittest.TestCase):
             heimdall.record_sent_nodes(self.nodes, self.now, imported=0)
 
 
+class NoGungnirContractTests(unittest.TestCase):
+    """Runs everywhere, including CI where gungnir is absent. This is the
+    environment the zero-dependency install has to keep working in."""
+
+    def test_filter_is_a_pass_through_without_the_library(self):
+        nodes = [node("0CE8")]
+        with mock.patch.object(heimdall, "_holds", return_value=None):
+            self.assertEqual(heimdall.filter_already_sent(nodes, time.time()),
+                             (nodes, 0))
+
+    def test_recording_is_a_no_op_without_the_library(self):
+        with mock.patch.object(heimdall, "_holds", return_value=None):
+            heimdall.record_sent_nodes([node("0CE8")], time.time(), 0)
+
+    def test_holds_available_answers_honestly(self):
+        self.assertIsInstance(heimdall.holds_available(), bool)
+
+
+@needs_gungnir
 class MainWiringTests(unittest.TestCase):
     """Driving main(), because everything above calls the gate directly and
     proves nothing about whether main() reaches it in the right places.
