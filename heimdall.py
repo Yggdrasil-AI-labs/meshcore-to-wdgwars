@@ -13,7 +13,10 @@ page from this single file, and zero runtime dependencies keeps the web
 flavor's bundle trivial. The 2026-06-03 family audit weighed extracting to
 gungnir (the historical `v0.2-gungnir` branch is dead, unmergeable
 history) and decided to keep the inline transport; transport fixes that
-land in gungnir must be ported here by hand.
+land in gungnir must be ported here by hand. GUNGNIR_RECONCILED_AT below
+records the last gungnir release that hand-porting was checked against,
+and tests/test_gungnir_drift.py fails once gungnir moves past it, so the
+porting debt announces itself instead of waiting to be noticed.
 
 Target schema (`type` is the constant envelope marker; the node's own role
 goes in the separate `node_type` field, earlier releases swapped these two
@@ -54,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
@@ -371,8 +374,38 @@ def _build_record(node_id: str, node_type: str, name: str,
 # scope, never in the browser, and any failure leaves the gate simply off.
 # An operator who has gungnir installed gets the gate; everyone else keeps
 # exactly the behaviour they had.
+# The gungnir release Heimdall's inlined transport was last reconciled
+# against. Heimdall does not depend on gungnir (see the module docstring),
+# so a transport fix landing there reaches this file only when a human
+# carries it over. Nothing announced that debt before: check_deliberate_skip
+# shipped in gungnir v0.1.4 and Heimdall went without it, while gungnir's
+# own README listed Heimdall as a consumer.
+#
+# Bump this after reading gungnir's changelog and either porting the change
+# or deciding it does not apply. The test that reads it is skipped wherever
+# gungnir is not installed, which includes CI.
+GUNGNIR_RECONCILED_AT = "0.4.1"
+
 HOLDS_TOOL = "heimdall"
 HOLDS_SLOT = "meshcore_nodes"
+
+
+# Phrases the server uses to say it chose not to reprocess a payload it
+# already had. Kept in step with gungnir.diagnostics.DELIBERATE_SKIP_MARKERS;
+# matched only against the informational fields, never against counters,
+# because an explicit statement is the contract and zero counters are not.
+_DELIBERATE_SKIP_MARKERS = ("already uploaded recently", "no new processing")
+_SKIP_FIELDS = ("info", "message", "note")
+
+
+def _deliberate_skip(response: dict) -> str | None:
+    """The server's own words if it says it skipped a payload it had."""
+    for field in _SKIP_FIELDS:
+        text = response.get(field)
+        if isinstance(text, str) and any(
+                m in text.lower() for m in _DELIBERATE_SKIP_MARKERS):
+            return text
+    return None
 
 
 def _in_browser() -> bool:
@@ -2130,6 +2163,15 @@ def main(argv: list[str] | None = None) -> int:
     # no state between runs, so make that silence visible instead of letting
     # it read as a clean upload.
     # None means "no counters to audit" (dry-run, or a body we couldn't parse).
+    # Ported by hand from gungnir.diagnostics (v0.1.4) while reconciling
+    # against v0.4.1. The server answers a payload it has already taken
+    # with 200, ok:true, every counter zero and an explanation in the
+    # clear. gungnir's consumers had that misread as a silent drop and
+    # failed the upload; Heimdall never had that bug, having no
+    # silent-drop detector, but it WOULD print its "gave no verdict" note
+    # and tell the operator the server refused to account for their
+    # nodes. It accounted for them on an earlier push.
+    deliberate_skip: str | None = None
     accounted: int | None = 0
     # Same None-means-unknown discipline as `accounted`, for the holds gate:
     # a day-long hold is only earned by a server that actually said it
@@ -2145,6 +2187,7 @@ def main(argv: list[str] | None = None) -> int:
         if 200 <= status < 300:
             try:
                 data = json.loads(body)
+                deliberate_skip = deliberate_skip or _deliberate_skip(data)
                 imp = data.get("meshcore_imported", 0)
                 seen = data.get("meshcore_already_seen", 0)
                 rejected = data.get("meshcore_rejected", 0)
@@ -2189,7 +2232,11 @@ def main(argv: list[str] | None = None) -> int:
             accounted = None
             imported_total = None
             rc = 1
-    if accounted is not None and accounted < len(nodes):
+    if deliberate_skip and accounted == 0:
+        print(f"{_INFO()} the server had already taken this payload: "
+              f"{deliberate_skip} Nothing was lost and there is nothing to "
+              f"fix.", file=sys.stderr)
+    elif accounted is not None and accounted < len(nodes):
         print(f"[heimdall] note: the server's counters account for "
               f"{accounted} of the {len(nodes)} submitted nodes (imported + "
               f"already seen + rejected), and gave no verdict for the other "

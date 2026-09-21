@@ -4,6 +4,34 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-09-21 - Make the hand-porting debt announce itself
+
+### Added
+
+- **`GUNGNIR_RECONCILED_AT` and a drift test.** Heimdall inlines its own
+  transport and does not depend on gungnir, so a transport fix landing
+  there reaches this file only when a human carries it over. Nothing said
+  when that was overdue: `check_deliberate_skip` shipped in gungnir v0.1.4,
+  Heimdall never got it, and gungnir's README listed Heimdall as a
+  consumer, so the gap looked closed from both sides.
+
+  `tests/test_gungnir_drift.py` now fails once gungnir moves past the
+  recorded marker, with instructions to read the changelog and port or
+  dismiss each change rather than just raising the number. It is skipped
+  where gungnir is not installed, which includes CI. That is the honest
+  weakness of it: it only fires on a machine that has the library.
+
+- **The server's deliberate-skip reply is recognised**, ported by hand from
+  `gungnir.diagnostics` as part of reconciling against v0.4.1. The server
+  answers a payload it has already taken with 200, ok:true, every counter
+  zero and an explanation in the clear. Heimdall never had gungnir's bug of
+  calling that a failed upload, having no silent-drop detector, but it did
+  print its "gave no verdict for the other N nodes" note, which tells the
+  operator the server refused to account for their nodes when it had
+  accounted for them on an earlier push. It now says what actually
+  happened. A test asserts the marker list matches gungnir's, since drift
+  there would silently stop the recognition working.
+
 ## [0.9.0] - 2026-09-21 - Skip nodes the server already has (optional)
 
 ### Added
