@@ -50,6 +50,12 @@ The web version lives at [yggdrasil-ai-labs.github.io/meshcore-to-wdgwars](https
 
 Heimdall is pure stdlib Python (no `pip install` step). You have two ways to grab it.
 
+> **Optional:** if [gungnir](https://github.com/Yggdrasil-AI-labs/gungnir) is
+> installed, Heimdall will skip re-uploading nodes the server has already
+> confirmed it holds (see *Already-sent holds* below). It is genuinely
+> optional: without it Heimdall behaves exactly as it always has, and the
+> in-browser version never uses it at all.
+
 ### Option A: git clone (recommended if you have git)
 
 ```bash

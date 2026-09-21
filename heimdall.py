@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
@@ -348,6 +348,95 @@ def _build_record(node_id: str, node_type: str, name: str,
         except (TypeError, ValueError):
             pass
     return record
+
+
+# ───────────────────────── Already-sent holds ────────────────────────────────
+#
+# Don't re-upload nodes the server has already confirmed it holds. A capture
+# pushed on a timer carries the same nodes every run, and the server counts
+# those as syncs that carried nothing new (the Uplink page says so out loud).
+#
+# The mechanism is gungnir.holds, shared with Muninn and wigle-to-wdgwars, but
+# Heimdall does NOT take a dependency on gungnir and this code must not make
+# it one. Two reasons, both load-bearing:
+#
+#   1. The 2026-06-03 family audit deliberately kept Heimdall's transport
+#      inlined so this one file ships as both a CLI and a Pyodide page with
+#      zero runtime dependencies.
+#   2. gungnir imports `ssl` at module scope and builds an SSL context at
+#      import time. Pyodide unvendors `ssl`. v0.8.0 already took the live
+#      Pages deploy down with an import of that shape.
+#
+# So: imported lazily inside the two functions that need it, never at module
+# scope, never in the browser, and any failure leaves the gate simply off.
+# An operator who has gungnir installed gets the gate; everyone else keeps
+# exactly the behaviour they had.
+HOLDS_TOOL = "heimdall"
+HOLDS_SLOT = "meshcore_nodes"
+
+
+def _in_browser() -> bool:
+    """True under Pyodide/Emscripten, where gungnir must not be imported."""
+    return sys.platform == "emscripten" or "pyodide" in sys.modules
+
+
+def _holds():
+    """The gungnir.holds module, or None when the gate cannot run here.
+
+    Lazy and broad in what it swallows on purpose. This must never be the
+    reason an upload fails or a browser page dies.
+    """
+    if _in_browser():
+        return None
+    try:
+        import gungnir.holds as _h
+        return _h
+    except Exception:
+        return None
+
+
+def holds_available() -> bool:
+    """Whether the already-sent gate is active in this environment."""
+    return _holds() is not None
+
+
+def filter_already_sent(
+        nodes: list[dict[str, Any]],
+        now: float) -> tuple[list[dict[str, Any]], int]:
+    """Drop nodes still held from an earlier upload.
+
+    Returns ``(remaining, dropped)``. With no gungnir, or nothing held,
+    every node is returned: the gate being unavailable must look exactly
+    like having nothing to skip.
+    """
+    h = _holds()
+    if h is None or not nodes:
+        return nodes, 0
+    state = h.prune(h.load(HOLDS_TOOL), now)
+    if not state:
+        return nodes, 0
+    keep = [n for n in nodes
+            if not h.is_held(n.get("node_id", "").upper() or None, state, now)]
+    return keep, len(nodes) - len(keep)
+
+
+def record_sent_nodes(nodes: list[dict[str, Any]], sent_at: float,
+                      imported: int | None) -> None:
+    """Hold the nodes just uploaded, for as long as the server's answer
+    justifies: a day when it imported nothing (so it already held them
+    all), an hour otherwise.
+
+    ``imported`` is the caller's own total across chunks, NOT read back
+    from gungnir's watermark: Heimdall posts with its own transport and
+    never writes one. None means the total could not be established, which
+    is not the same as zero and must not earn the long hold.
+    """
+    h = _holds()
+    if h is None or not nodes:
+        return
+    h.record_keys(HOLDS_TOOL,
+                  [n.get("node_id", "").upper() for n in nodes],
+                  sent_at, h.ttl_for(imported))
 
 
 def collapse_repeat_sightings(
@@ -2012,6 +2101,21 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(row))
         return 0
 
+    # After --preview, so a preview always shows the whole capture, and
+    # before the key is resolved, so a run with nothing new to say costs
+    # nothing at all. Skipped for --dry-run: a dry run reports what WOULD
+    # be sent, which is not the same question.
+    if not args.dry_run:
+        nodes, held_back = filter_already_sent(nodes, time.time())
+        if held_back:
+            if not nodes:
+                print(f"[heimdall] nothing new to send: all {held_back} "
+                      f"node(s) are already on your account. Skipping "
+                      f"upload.", file=sys.stderr)
+                return 0
+            print(f"[heimdall] {held_back} node(s) already on your account, "
+                  f"sending {len(nodes)}.", file=sys.stderr)
+
     key = load_key(args.key)
     if not key:
         print("missing API key: pass --key, set WDGWARS_API_KEY, or run "
@@ -2027,10 +2131,16 @@ def main(argv: list[str] | None = None) -> int:
     # it read as a clean upload.
     # None means "no counters to audit" (dry-run, or a body we couldn't parse).
     accounted: int | None = 0
+    # Same None-means-unknown discipline as `accounted`, for the holds gate:
+    # a day-long hold is only earned by a server that actually said it
+    # imported nothing, never by a total we failed to read.
+    imported_total: int | None = 0
+    sent_at = time.time()
     for status, body in upload(nodes, key, endpoint=args.api_url, dry_run=args.dry_run):
         if status == 0:
             print(f"{_INFO()} {body}", file=sys.stderr)
             accounted = None
+            imported_total = None
             continue
         if 200 <= status < 300:
             try:
@@ -2042,6 +2152,8 @@ def main(argv: list[str] | None = None) -> int:
                 badges = data.get("new_badges") or []
                 if accounted is not None:
                     accounted += imp + seen + rejected
+                if imported_total is not None:
+                    imported_total += imp
                 print(f"{_OK()} accepted by wdgwars.pl. "
                       f"{imp} new meshcore nodes, {seen} already on your account.",
                       file=sys.stderr)
@@ -2051,6 +2163,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  new badges: {badges}", file=sys.stderr)
             except Exception:
                 accounted = None
+                imported_total = None
                 print(f"{_OK()} accepted by wdgwars.pl (HTTP {status}): "
                       f"{_scrub(body[:200], key)}", file=sys.stderr)
         else:
@@ -2074,6 +2187,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{_FAIL()} rejected by wdgwars.pl (HTTP {status}): "
                       f"{_scrub(body[:200], key)}", file=sys.stderr)
             accounted = None
+            imported_total = None
             rc = 1
     if accounted is not None and accounted < len(nodes):
         print(f"[heimdall] note: the server's counters account for "
@@ -2082,6 +2196,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(nodes) - accounted}. Seen live when re-submitting a "
               f"payload it had just itemised as rejected (issue #1); the "
               f"unaccounted nodes were NOT imported.", file=sys.stderr)
+    if rc == 0 and not args.dry_run:
+        record_sent_nodes(nodes, sent_at, imported_total)
     return rc
 
 

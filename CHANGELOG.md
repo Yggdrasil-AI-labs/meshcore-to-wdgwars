@@ -4,6 +4,57 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-09-21 - Skip nodes the server already has (optional)
+
+### Added
+
+- **An already-sent gate, active only when gungnir is installed.** A
+  capture pushed on a timer carries the same nodes every run, and the
+  server counts those as syncs that carried nothing new. Heimdall now
+  holds back nodes it has already uploaded, and skips the request entirely
+  when every node in the capture is one the server confirmed it holds.
+
+  Hold length follows the server's own answer: a day when an upload
+  imported nothing (it already held them all), an hour when it imported
+  something, and an hour when the total could not be established. `None`
+  is not zero here, deliberately: a total we failed to read must not earn
+  a day-long hold on a payload nobody confirmed.
+
+  `--dry-run` neither consults nor records holds, so a dry run keeps
+  reporting what *would* be sent. A failed upload records nothing, so it
+  retries.
+
+- **`gungnir.holds` is used without taking a dependency on gungnir.** The
+  import is lazy, inside the two functions that need it, never at module
+  scope, and never in the browser. Three reasons, all load-bearing:
+
+  1. The 2026-06-03 family audit deliberately kept Heimdall's transport
+     inlined so this one file ships as both a CLI and a Pyodide page with
+     zero runtime dependencies. That decision stands.
+  2. gungnir imports `ssl` at module scope and builds an SSL context at
+     import time. Pyodide unvendors `ssl`, and v0.8.0 already took the
+     live Pages deploy down with an import of that shape.
+  3. Anything going wrong with the import leaves the gate off rather than
+     failing an upload.
+
+  `holds_available()` reports whether the gate is active, so an operator
+  never has to guess.
+
+### Fixed
+
+- **The test suite could write holds into the real config directory.** The
+  live-key guard stopped tests posting to the real account; nothing
+  stopped them writing state into it. One test's upload recorded its
+  fixture node_ids and the next test's upload was then skipped, which read
+  as a bug in the code under test and survived between runs. Holds now
+  point at a throwaway directory, reset per test.
+
+### Note
+
+- gungnir's own README and package description had claimed Heimdall as a
+  consumer since before the 2026-06-03 audit. That was never true and has
+  been corrected upstream.
+
 ## [0.8.2] - 2026-09-15 - Both calls move to /endpoint/*
 
 Heimdall was the last feeder in the family still calling `/api/*` for

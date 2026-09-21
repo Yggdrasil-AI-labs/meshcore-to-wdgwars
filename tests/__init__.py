@@ -55,3 +55,47 @@ def _check_live_key_guard() -> None:
 
 
 _check_live_key_guard()
+
+
+def _isolate_holds_state() -> None:
+    """Keep the already-sent holds out of the operator's real config dir.
+
+    The live-key guard above stops the suite posting to the real account.
+    This stops it WRITING state into it, which is a separate hole and it
+    was open the moment the holds gate landed: the first test to upload
+    recorded its fixture node_ids into the operator's own holds file, the
+    next test's nodes were then held, and its upload never happened. The
+    failure looked like a bug in the code under test and survived between
+    runs, which is the worst combination.
+
+    Reset per test, because holds persist by design and one test's upload
+    must not decide another's outcome.
+    """
+    import atexit
+    import shutil
+    import tempfile
+    import unittest
+
+    try:
+        import gungnir.holds as holds
+    except Exception:
+        return  # gate inactive here; nothing to isolate
+
+    tmp = tempfile.mkdtemp(prefix="heimdall-tests-holds-")
+    atexit.register(shutil.rmtree, tmp, True)
+    holds._path = lambda tool: Path(tmp) / f"{tool}-holds.json"
+
+    _real_run = unittest.TestCase.run
+
+    def _run_with_clean_state(self, *a, **kw):
+        for stale in Path(tmp).glob("*.json"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        return _real_run(self, *a, **kw)
+
+    unittest.TestCase.run = _run_with_clean_state
+
+
+_isolate_holds_state()
