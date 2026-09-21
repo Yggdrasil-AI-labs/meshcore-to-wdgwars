@@ -384,7 +384,13 @@ def _build_record(node_id: str, node_type: str, name: str,
 # Bump this after reading gungnir's changelog and either porting the change
 # or deciding it does not apply. The test that reads it is skipped wherever
 # gungnir is not installed, which includes CI.
-GUNGNIR_RECONCILED_AT = "0.4.1"
+#
+# Reconciliation log:
+#   0.4.1 -> 0.4.2: nothing to port. The only files that changed were a test
+#   and the version string; `git diff v0.4.1..v0.4.2 --name-only` touches no
+#   transport code. Checked, not assumed, because the whole value of this
+#   marker is that raising it means something.
+GUNGNIR_RECONCILED_AT = "0.4.2"
 
 HOLDS_TOOL = "heimdall"
 HOLDS_SLOT = "meshcore_nodes"
