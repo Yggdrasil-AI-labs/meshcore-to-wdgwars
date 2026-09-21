@@ -4,6 +4,21 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-09-21 - Reconciled against gungnir 0.4.2
+
+### Changed
+
+- `GUNGNIR_RECONCILED_AT` moves to **0.4.2**. The drift guard added in
+  0.9.1 fired on its first real opportunity, which is the point of it:
+  gungnir released 0.4.2 and this file still claimed 0.4.1, so the suite
+  went red until someone looked.
+
+  Looked. `git diff v0.4.1..v0.4.2 --name-only` touches a test file, the
+  changelog and the version string, and no transport code, so there is
+  nothing to port. The reasoning now sits in a reconciliation log beside
+  the constant, so the next person can see what was checked rather than
+  trusting that a number was raised for a good reason.
+
 ## [0.9.1] - 2026-09-21 - Make the hand-porting debt announce itself
 
 ### Added

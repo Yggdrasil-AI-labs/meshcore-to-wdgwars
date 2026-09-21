@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
