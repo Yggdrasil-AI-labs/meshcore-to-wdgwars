@@ -20,3 +20,7 @@ rtk/
 
 # Claude Code local dev config, not project content
 .claude/
+
+# RTK leftovers. The hook that wrote these was removed 2026-09-13; the
+# db carries local paths and has no business in a public repo.
+rtk/
