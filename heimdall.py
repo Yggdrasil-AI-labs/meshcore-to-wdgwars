@@ -399,7 +399,9 @@ def _build_record(node_id: str, node_type: str, name: str,
 #   are consumed by the lazy holds gate below (v0.11.0).
 #   0.6.0 -> 0.6.1: nothing to port; holds.save now writes 0600, which
 #   Heimdall inherits through the lazy import with no code change.
-GUNGNIR_RECONCILED_AT = "0.6.1"
+#   0.6.1 -> 0.6.2: nothing to port; holds.save retries a rename blocked by
+#   another process (Windows), inherited through the lazy import.
+GUNGNIR_RECONCILED_AT = "0.6.2"
 
 HOLDS_TOOL = "heimdall"
 HOLDS_SLOT = "meshcore_nodes"
