@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.9.2"
+__version__ = "0.10.0"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
@@ -390,7 +390,11 @@ def _build_record(node_id: str, node_type: str, name: str,
 #   and the version string; `git diff v0.4.1..v0.4.2 --name-only` touches no
 #   transport code. Checked, not assumed, because the whole value of this
 #   marker is that raising it means something.
-GUNGNIR_RECONCILED_AT = "0.4.2"
+#   0.4.2 -> 0.5.0: nothing to port to the transport; `git diff
+#   v0.4.2..v0.5.0 --name-only` touches only holds.py, its test, the
+#   changelog and the version. ACCEPTED_TTL is consumed directly by the
+#   lazy holds gate below (v0.10.0).
+GUNGNIR_RECONCILED_AT = "0.5.0"
 
 HOLDS_TOOL = "heimdall"
 HOLDS_SLOT = "meshcore_nodes"
@@ -429,9 +433,11 @@ def _holds():
         return None
     try:
         import gungnir.holds as _h
-        return _h
     except Exception:
         return None
+    # ACCEPTED_TTL arrived in gungnir 0.5.0. An older copy turns the gate
+    # off rather than failing mid-upload.
+    return _h if hasattr(_h, "ACCEPTED_TTL") else None
 
 
 def holds_available() -> bool:
@@ -439,10 +445,30 @@ def holds_available() -> bool:
     return _holds() is not None
 
 
+def _sighting_key(node: dict[str, Any]) -> str | None:
+    """The hold key for one sighting: network + node_id + first_seen.
+
+    v0.10.0 keys the SIGHTING, not the node. Per the 2026-08-12 mesh-slot
+    contract a sighting always counts and a more direct one can move the
+    node's position, so a node heard again on a later capture is data the
+    server does not have. The same record pushed again by a timer is, and
+    first_seen is what tells the two apart. `network` is in the key because
+    a MeshCore id and a Meshtastic id can be the same string for two
+    different devices.
+
+    None when node_id or first_seen is missing, which means "always upload".
+    """
+    node_id = (node.get("node_id") or "").strip().upper()
+    seen = (node.get("first_seen") or "").strip()
+    if not node_id or not seen:
+        return None
+    return f"{(node.get('network') or '').strip().lower()}|{node_id}|{seen}"
+
+
 def filter_already_sent(
         nodes: list[dict[str, Any]],
         now: float) -> tuple[list[dict[str, Any]], int]:
-    """Drop nodes still held from an earlier upload.
+    """Drop sightings still held from an earlier upload.
 
     Returns ``(remaining, dropped)``. With no gungnir, or nothing held,
     every node is returned: the gate being unavailable must look exactly
@@ -454,28 +480,23 @@ def filter_already_sent(
     state = h.prune(h.load(HOLDS_TOOL), now)
     if not state:
         return nodes, 0
-    keep = [n for n in nodes
-            if not h.is_held(n.get("node_id", "").upper() or None, state, now)]
+    keep = [n for n in nodes if not h.is_held(_sighting_key(n), state, now)]
     return keep, len(nodes) - len(keep)
 
 
-def record_sent_nodes(nodes: list[dict[str, Any]], sent_at: float,
-                      imported: int | None) -> None:
-    """Hold the nodes just uploaded, for as long as the server's answer
-    justifies: a day when it imported nothing (so it already held them
-    all), an hour otherwise.
+def record_sent_nodes(nodes: list[dict[str, Any]], sent_at: float) -> None:
+    """Hold the sightings just uploaded for gungnir.holds.ACCEPTED_TTL.
 
-    ``imported`` is the caller's own total across chunks, NOT read back
-    from gungnir's watermark: Heimdall posts with its own transport and
-    never writes one. None means the total could not be established, which
-    is not the same as zero and must not earn the long hold.
+    30 days, whatever the server said it imported. The key is the sighting,
+    so after an accepted upload every one of them is a record the server
+    already took, and the hour/day split v0.9.x chose from the imported
+    total has nothing left to decide.
     """
     h = _holds()
     if h is None or not nodes:
         return
-    h.record_keys(HOLDS_TOOL,
-                  [n.get("node_id", "").upper() for n in nodes],
-                  sent_at, h.ttl_for(imported))
+    h.record_keys(HOLDS_TOOL, [_sighting_key(n) for n in nodes],
+                  sent_at, h.ACCEPTED_TTL)
 
 
 def collapse_repeat_sightings(
@@ -2179,16 +2200,11 @@ def main(argv: list[str] | None = None) -> int:
     # nodes. It accounted for them on an earlier push.
     deliberate_skip: str | None = None
     accounted: int | None = 0
-    # Same None-means-unknown discipline as `accounted`, for the holds gate:
-    # a day-long hold is only earned by a server that actually said it
-    # imported nothing, never by a total we failed to read.
-    imported_total: int | None = 0
     sent_at = time.time()
     for status, body in upload(nodes, key, endpoint=args.api_url, dry_run=args.dry_run):
         if status == 0:
             print(f"{_INFO()} {body}", file=sys.stderr)
             accounted = None
-            imported_total = None
             continue
         if 200 <= status < 300:
             try:
@@ -2201,8 +2217,6 @@ def main(argv: list[str] | None = None) -> int:
                 badges = data.get("new_badges") or []
                 if accounted is not None:
                     accounted += imp + seen + rejected
-                if imported_total is not None:
-                    imported_total += imp
                 print(f"{_OK()} accepted by wdgwars.pl. "
                       f"{imp} new meshcore nodes, {seen} already on your account.",
                       file=sys.stderr)
@@ -2212,7 +2226,6 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  new badges: {badges}", file=sys.stderr)
             except Exception:
                 accounted = None
-                imported_total = None
                 print(f"{_OK()} accepted by wdgwars.pl (HTTP {status}): "
                       f"{_scrub(body[:200], key)}", file=sys.stderr)
         else:
@@ -2236,7 +2249,6 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{_FAIL()} rejected by wdgwars.pl (HTTP {status}): "
                       f"{_scrub(body[:200], key)}", file=sys.stderr)
             accounted = None
-            imported_total = None
             rc = 1
     if deliberate_skip and accounted == 0:
         print(f"{_INFO()} the server had already taken this payload: "
@@ -2250,7 +2262,7 @@ def main(argv: list[str] | None = None) -> int:
               f"payload it had just itemised as rejected (issue #1); the "
               f"unaccounted nodes were NOT imported.", file=sys.stderr)
     if rc == 0 and not args.dry_run:
-        record_sent_nodes(nodes, sent_at, imported_total)
+        record_sent_nodes(nodes, sent_at)
     return rc
 
 

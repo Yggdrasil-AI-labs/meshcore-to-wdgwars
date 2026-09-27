@@ -4,6 +4,31 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-09-27 - Hold the sighting, not the node
+
+### Changed
+
+- **The already-sent key is now network + node_id + first_seen** (was
+  node_id). Under the 2026-08-12 mesh-slot contract a sighting always
+  counts and a more direct one can move a node's position, so a node heard
+  again on a later capture is new data. The old key held it back for up to
+  a day. The same record pushed again by a timer is still suppressed.
+  `network` is in the key because a MeshCore id and a Meshtastic id can be
+  the same string for two different devices.
+- **Every accepted sighting is held for 30 days**
+  (`gungnir.holds.ACCEPTED_TTL`), replacing the hour/day split and the
+  imported total that chose between them.
+- **A gungnir older than 0.5.0 turns the gate off** instead of failing.
+  gungnir is still optional and still never imported in the browser.
+- `GUNGNIR_RECONCILED_AT` moves to **0.5.0**. Nothing to port to the
+  transport: 0.4.2..0.5.0 touches only holds.py, its test, the changelog
+  and the version.
+
+### Upgrade note
+
+- Holds written by 0.9.x use the old key and stop matching, costing at
+  most one redundant upload.
+
 ## [0.9.2] - 2026-09-21 - Reconciled against gungnir 0.4.2
 
 ### Changed

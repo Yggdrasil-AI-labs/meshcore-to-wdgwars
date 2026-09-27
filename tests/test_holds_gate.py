@@ -91,20 +91,20 @@ class FilterTests(unittest.TestCase):
         self.assertEqual((out, dropped), (self.nodes, 0))
 
     def test_held_nodes_are_dropped(self):
-        heimdall.record_sent_nodes([node("0CE8")], self.now, imported=1)
+        heimdall.record_sent_nodes([node("0CE8")], self.now)
         out, dropped = heimdall.filter_already_sent(self.nodes, self.now)
         self.assertEqual(dropped, 1)
         self.assertEqual([n["node_id"] for n in out], ["910e"])
 
     def test_all_held_returns_an_empty_list(self):
-        heimdall.record_sent_nodes(self.nodes, self.now, imported=1)
+        heimdall.record_sent_nodes(self.nodes, self.now)
         out, dropped = heimdall.filter_already_sent(self.nodes, self.now)
         self.assertEqual((out, dropped), ([], 2))
 
     def test_an_expired_hold_does_not_drop(self):
-        heimdall.record_sent_nodes(self.nodes, self.now, imported=1)
+        heimdall.record_sent_nodes(self.nodes, self.now)
         import gungnir.holds as holds
-        later = self.now + holds.SENT_TTL + 1
+        later = self.now + holds.ACCEPTED_TTL + 1
         out, dropped = heimdall.filter_already_sent(self.nodes, later)
         self.assertEqual(dropped, 0)
 
@@ -120,33 +120,57 @@ class RecordTests(unittest.TestCase):
         import gungnir.holds as holds
         self.holds = holds
 
-    def test_nothing_imported_earns_the_long_hold(self):
-        heimdall.record_sent_nodes(self.nodes, self.now, imported=0)
-        state = self.holds.load(heimdall.HOLDS_TOOL)
-        self.assertGreater(state["0CE8"], self.now + self.holds.SENT_TTL)
+    def _key(self, n):
+        return heimdall._sighting_key(n)
 
-    def test_something_imported_keeps_the_short_hold(self):
-        heimdall.record_sent_nodes(self.nodes, self.now, imported=3)
+    def test_an_accepted_upload_is_held_for_thirty_days(self):
+        heimdall.record_sent_nodes(self.nodes, self.now)
         state = self.holds.load(heimdall.HOLDS_TOOL)
-        self.assertLessEqual(state["0CE8"], self.now + self.holds.SENT_TTL)
+        self.assertEqual(state[self._key(self.nodes[0])],
+                         self.now + self.holds.ACCEPTED_TTL)
 
-    def test_an_unknown_total_is_not_treated_as_zero(self):
-        # The distinction the whole family got wrong once: a total we could
-        # not read must not earn a day-long hold on an unconfirmed payload.
-        heimdall.record_sent_nodes(self.nodes, self.now, imported=None)
-        state = self.holds.load(heimdall.HOLDS_TOOL)
-        self.assertLessEqual(state["0CE8"], self.now + self.holds.SENT_TTL)
+    def test_a_new_sighting_of_a_sent_node_still_goes_up(self):
+        # The v0.10.0 point: a sighting always counts and a more direct one
+        # can move the node, so hearing it again later is new data.
+        heimdall.record_sent_nodes(self.nodes, self.now)
+        later = node("0CE8", first_seen="2026-09-22 08:00:00")
+        out, dropped = heimdall.filter_already_sent([later], self.now)
+        self.assertEqual((len(out), dropped), (1, 0))
+
+    def test_the_network_is_part_of_the_key(self):
+        # A MeshCore id and a Meshtastic id can be the same string for two
+        # different devices.
+        heimdall.record_sent_nodes(self.nodes, self.now)
+        other = node("0CE8", network="meshtastic")
+        out, dropped = heimdall.filter_already_sent([other], self.now)
+        self.assertEqual(dropped, 0)
+
+    def test_a_sighting_without_first_seen_is_never_held(self):
+        bare = node("0CE8", first_seen="")
+        self.assertIsNone(heimdall._sighting_key(bare))
+        heimdall.record_sent_nodes([bare], self.now)
+        out, dropped = heimdall.filter_already_sent([bare], self.now)
+        self.assertEqual(dropped, 0)
 
     def test_node_ids_are_held_case_insensitively(self):
         # Records carry node_id lower-cased; holds key on upper. A mismatch
         # would mean nothing was ever suppressed.
-        heimdall.record_sent_nodes([node("abcd")], self.now, imported=1)
+        heimdall.record_sent_nodes([node("abcd")], self.now)
         out, dropped = heimdall.filter_already_sent([node("ABCD")], self.now)
         self.assertEqual((out, dropped), ([], 1))
 
     def test_no_gungnir_records_nothing_and_does_not_raise(self):
         with mock.patch.object(heimdall, "_holds", return_value=None):
-            heimdall.record_sent_nodes(self.nodes, self.now, imported=0)
+            heimdall.record_sent_nodes(self.nodes, self.now)
+
+    def test_a_gungnir_without_accepted_ttl_leaves_the_gate_off(self):
+        # A pre-0.5.0 gungnir must turn the gate off, not fail an upload.
+        real = self.holds.ACCEPTED_TTL
+        try:
+            del self.holds.ACCEPTED_TTL
+            self.assertIsNone(heimdall._holds())
+        finally:
+            self.holds.ACCEPTED_TTL = real
 
 
 class NoGungnirContractTests(unittest.TestCase):
@@ -161,7 +185,7 @@ class NoGungnirContractTests(unittest.TestCase):
 
     def test_recording_is_a_no_op_without_the_library(self):
         with mock.patch.object(heimdall, "_holds", return_value=None):
-            heimdall.record_sent_nodes([node("0CE8")], time.time(), 0)
+            heimdall.record_sent_nodes([node("0CE8")], time.time())
 
     def test_holds_available_answers_honestly(self):
         self.assertIsInstance(heimdall.holds_available(), bool)
