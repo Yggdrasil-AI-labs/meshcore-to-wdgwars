@@ -249,5 +249,32 @@ class MainWiringTests(unittest.TestCase):
                          "a failed upload must be retried, not held back")
 
 
+
+@needs_gungnir
+class PerKeyAndResetTests(unittest.TestCase):
+    """v0.11.0: holds are per API key, and --reset-holds clears them."""
+
+    def setUp(self):
+        self.now = time.time()
+
+    def test_a_second_key_is_not_held_by_the_first(self):
+        n = [node("0CE8")]
+        heimdall.record_sent_nodes(n, self.now, "key-a")
+        self.assertEqual(heimdall.filter_already_sent(n, self.now, "key-a"),
+                         ([], 1))
+        out, dropped = heimdall.filter_already_sent(n, self.now, "key-b")
+        self.assertEqual(dropped, 0,
+                         "another account has not been sent this sighting")
+
+    def test_reset_holds_flag_calls_reset_and_exits_clean(self):
+        # reset is mocked: the suite isolates holds._path, not config_dir,
+        # so a real reset here would reach the operator's own directory.
+        import gungnir.holds as holds
+        with mock.patch.object(holds, "reset", return_value=[]) as reset:
+            rc = heimdall.main(["--reset-holds"])
+        self.assertEqual(rc, 0)
+        reset.assert_called_once_with(heimdall.HOLDS_TOOL)
+
+
 if __name__ == "__main__":
     unittest.main()

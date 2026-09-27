@@ -4,6 +4,20 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-09-27 - Per-key holds and --reset-holds
+
+### Added
+
+- **Holds are kept per API key** (with gungnir 0.6.0+). With the 30-day
+  hold, pointing Heimdall at another account's key would otherwise leave
+  that account without every sighting the first one was sent, for a month.
+  The key is now read before the gate runs, a local lookup with no network;
+  the missing-key error still comes after it, so a run with nothing new
+  still skips without one.
+- **`--reset-holds`** deletes every holds file, all keys, so the next
+  upload sends in full.
+- `GUNGNIR_RECONCILED_AT` moves to **0.6.0**; no transport change to port.
+
 ## [0.10.0] - 2026-09-27 - Hold the sighting, not the node
 
 ### Changed

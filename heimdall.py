@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
@@ -394,7 +394,10 @@ def _build_record(node_id: str, node_type: str, name: str,
 #   v0.4.2..v0.5.0 --name-only` touches only holds.py, its test, the
 #   changelog and the version. ACCEPTED_TTL is consumed directly by the
 #   lazy holds gate below (v0.10.0).
-GUNGNIR_RECONCILED_AT = "0.5.0"
+#   0.5.0 -> 0.6.0: nothing to port to the transport; only holds.py (per-key
+#   scopes, reset), its test, the changelog and the version changed. Both
+#   are consumed by the lazy holds gate below (v0.11.0).
+GUNGNIR_RECONCILED_AT = "0.6.0"
 
 HOLDS_TOOL = "heimdall"
 HOLDS_SLOT = "meshcore_nodes"
@@ -437,7 +440,9 @@ def _holds():
         return None
     # ACCEPTED_TTL arrived in gungnir 0.5.0. An older copy turns the gate
     # off rather than failing mid-upload.
-    return _h if hasattr(_h, "ACCEPTED_TTL") else None
+    # ACCEPTED_TTL arrived in 0.5.0 and scoped/reset in 0.6.0.
+    ok = all(hasattr(_h, a) for a in ("ACCEPTED_TTL", "scoped", "reset"))
+    return _h if ok else None
 
 
 def holds_available() -> bool:
@@ -466,8 +471,8 @@ def _sighting_key(node: dict[str, Any]) -> str | None:
 
 
 def filter_already_sent(
-        nodes: list[dict[str, Any]],
-        now: float) -> tuple[list[dict[str, Any]], int]:
+        nodes: list[dict[str, Any]], now: float,
+        api_key: str | None = None) -> tuple[list[dict[str, Any]], int]:
     """Drop sightings still held from an earlier upload.
 
     Returns ``(remaining, dropped)``. With no gungnir, or nothing held,
@@ -477,14 +482,17 @@ def filter_already_sent(
     h = _holds()
     if h is None or not nodes:
         return nodes, 0
-    state = h.prune(h.load(HOLDS_TOOL), now)
+    # One holds file per API key (v0.11.0): what one account was sent says
+    # nothing about what another has.
+    state = h.prune(h.load(h.scoped(HOLDS_TOOL, api_key)), now)
     if not state:
         return nodes, 0
     keep = [n for n in nodes if not h.is_held(_sighting_key(n), state, now)]
     return keep, len(nodes) - len(keep)
 
 
-def record_sent_nodes(nodes: list[dict[str, Any]], sent_at: float) -> None:
+def record_sent_nodes(nodes: list[dict[str, Any]], sent_at: float,
+                      api_key: str | None = None) -> None:
     """Hold the sightings just uploaded for gungnir.holds.ACCEPTED_TTL.
 
     30 days, whatever the server said it imported. The key is the sighting,
@@ -495,8 +503,26 @@ def record_sent_nodes(nodes: list[dict[str, Any]], sent_at: float) -> None:
     h = _holds()
     if h is None or not nodes:
         return
-    h.record_keys(HOLDS_TOOL, [_sighting_key(n) for n in nodes],
+    h.record_keys(h.scoped(HOLDS_TOOL, api_key),
+                  [_sighting_key(n) for n in nodes],
                   sent_at, h.ACCEPTED_TTL)
+
+
+def reset_holds() -> int:
+    """--reset-holds: delete every already-sent holds file, all keys."""
+    h = _holds()
+    if h is None:
+        print("[heimdall] the already-sent gate is not active here (needs "
+              "gungnir 0.6.0 or newer); nothing to reset.", file=sys.stderr)
+        return 0
+    removed = h.reset(HOLDS_TOOL)
+    if not removed:
+        print("[heimdall] no holds to reset.", file=sys.stderr)
+        return 0
+    for f in removed:
+        print(f"[heimdall] removed {f}", file=sys.stderr)
+    print("[heimdall] the next upload sends in full.", file=sys.stderr)
+    return 0
 
 
 def collapse_repeat_sightings(
@@ -2015,6 +2041,10 @@ def main(argv: list[str] | None = None) -> int:
                         "the last N days (the database is all-time)")
     p.add_argument("--dry-run", action="store_true",
                    help="build the HMAC-signed envelope but do not POST")
+    p.add_argument("--reset-holds", action="store_true",
+                   help="forget which sightings have been sent, for every "
+                        "API key, so the next upload sends in full; exits "
+                        "after")
     p.add_argument("--preview", action="store_true",
                    help="print first 6 normalised rows as JSON and exit")
     p.add_argument("-q", "--quiet", action="store_true",
@@ -2100,6 +2130,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[heimdall] v{__version__} is current.", file=sys.stderr)
         return 0
 
+    if args.reset_holds:
+        return reset_holds()
+
     # Key management modes, handled before requiring an input file.
     if args.setup:
         return interactive_setup()
@@ -2161,12 +2194,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(row))
         return 0
 
-    # After --preview, so a preview always shows the whole capture, and
-    # before the key is resolved, so a run with nothing new to say costs
-    # nothing at all. Skipped for --dry-run: a dry run reports what WOULD
-    # be sent, which is not the same question.
+    # The key is read here (a local lookup, no network) because holds are
+    # per key; the missing-key error stays below, so a run with nothing new
+    # to say still skips without one. After --preview, so a preview always
+    # shows the whole capture. Skipped for --dry-run: a dry run reports
+    # what WOULD be sent, which is not the same question.
+    key = load_key(args.key)
     if not args.dry_run:
-        nodes, held_back = filter_already_sent(nodes, time.time())
+        nodes, held_back = filter_already_sent(nodes, time.time(), key)
         if held_back:
             if not nodes:
                 print(f"[heimdall] nothing new to send: all {held_back} "
@@ -2176,7 +2211,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[heimdall] {held_back} node(s) already on your account, "
                   f"sending {len(nodes)}.", file=sys.stderr)
 
-    key = load_key(args.key)
     if not key:
         print("missing API key: pass --key, set WDGWARS_API_KEY, or run "
               "`python3 heimdall.py --setup` once to save it", file=sys.stderr)
@@ -2262,7 +2296,7 @@ def main(argv: list[str] | None = None) -> int:
               f"payload it had just itemised as rejected (issue #1); the "
               f"unaccounted nodes were NOT imported.", file=sys.stderr)
     if rc == 0 and not args.dry_run:
-        record_sent_nodes(nodes, sent_at)
+        record_sent_nodes(nodes, sent_at, key)
     return rc
 
 

@@ -245,10 +245,11 @@ Italicised rows are not yet implemented. They are on the roadmap once sample dat
 
 | Flag | Purpose | Default |
 |---|---|---|
-| `csv` (positional) | Path to the MeshMapper CSV export. Optional with `--setup`, `--save-key`, `--whoami`, `--update`, `--schedule`, `--unschedule`. | (none) |
+| `csv` (positional) | Path to the MeshMapper CSV export. Optional with `--setup`, `--save-key`, `--whoami`, `--reset-holds`, `--update`, `--schedule`, `--unschedule`. | (none) |
 | `--setup` | Interactive first-time setup. Prompts for your WDGWars API key, validates it against `/endpoint/me`, and saves it to your user config dir. | off |
 | `--save-key KEY` | Non-interactive: save the given API key to the user config dir. Prefer `--setup` for first-time install. | off |
 | `--whoami` | Validate your stored API key by hitting `/endpoint/me` and printing username + node counts. | off |
+| `--reset-holds` | Forget which sightings have been sent, for every API key, so the next upload sends in full. Holds are kept per key and only exist when gungnir 0.6.0+ is installed. | off |
 | `--key KEY` | WDGWars API key. Overrides the `WDGWARS_API_KEY` env var and the saved key. Matches Muninn + wigle-to-wdgwars. | env / saved |
 | `--preview` | Parse the file, print the first six normalised rows as JSON, then exit. No envelope build, no upload. | off |
 | `--since-days N` | MeshCore app database only: skip nodes not heard in the last N days. The database is all-time, so without this an upload carries the whole back catalogue. Ignored (with a note) for other formats. | (all) |
