@@ -276,5 +276,99 @@ class PerKeyAndResetTests(unittest.TestCase):
         reset.assert_called_once_with(heimdall.HOLDS_TOOL)
 
 
+
+class _FakeHolds:
+    """A minimal stand-in for gungnir.holds, so the gate's wiring is covered
+    in CI, where gungnir is deliberately absent."""
+    ACCEPTED_TTL = 30 * 86400
+
+    def __init__(self, removed=()):
+        self.files: dict[str, dict] = {}
+        self.removed = list(removed)
+        self.reset_calls = []
+
+    def scoped(self, tool, key):
+        return f"{tool}@{key}" if key else tool
+
+    def load(self, tool):
+        return dict(self.files.get(tool, {}))
+
+    def prune(self, state, now):
+        return {k: v for k, v in state.items() if v > now}
+
+    def is_held(self, key, state, now):
+        return key is not None and state.get(key, 0) > now
+
+    def record_keys(self, tool, keys, now, ttl):
+        f = self.files.setdefault(tool, {})
+        for k in keys:
+            if k:
+                f[k] = now + ttl
+
+    def reset(self, tool):
+        self.reset_calls.append(tool)
+        return self.removed
+
+
+class FakeHoldsWiringTests(unittest.TestCase):
+    """Runs everywhere. Pins the per-key wiring and --reset-holds without
+    needing the real library."""
+
+    def setUp(self):
+        self.fake = _FakeHolds()
+        p = mock.patch.object(heimdall, "_holds", return_value=self.fake)
+        p.start()
+        self.addCleanup(p.stop)
+        self.now = time.time()
+
+    def test_holds_are_scoped_by_key(self):
+        n = [node("0CE8")]
+        heimdall.record_sent_nodes(n, self.now, "key-a")
+        self.assertEqual(list(self.fake.files), ["heimdall@key-a"])
+        self.assertEqual(heimdall.filter_already_sent(n, self.now, "key-a"),
+                         ([], 1))
+        self.assertEqual(
+            heimdall.filter_already_sent(n, self.now, "key-b")[1], 0)
+
+    def test_reset_with_files_reports_them(self):
+        self.fake.removed = ["holds-abc.json", "holds.json"]
+        self.assertEqual(heimdall.reset_holds(), 0)
+        self.assertEqual(self.fake.reset_calls, [heimdall.HOLDS_TOOL])
+
+    def test_reset_with_nothing_there(self):
+        self.assertEqual(heimdall.reset_holds(), 0)
+        self.assertEqual(self.fake.reset_calls, [heimdall.HOLDS_TOOL])
+
+    def test_the_flag_reaches_reset(self):
+        self.assertEqual(heimdall.main(["--reset-holds"]), 0)
+        self.assertEqual(self.fake.reset_calls, [heimdall.HOLDS_TOOL])
+
+
+class ResetWithoutGungnirTests(unittest.TestCase):
+    def test_reset_is_a_clean_no_op_without_the_library(self):
+        with mock.patch.object(heimdall, "_holds", return_value=None):
+            self.assertEqual(heimdall.reset_holds(), 0)
+
+    def _fake_gungnir(self, **attrs):
+        import types
+        pkg = types.ModuleType("gungnir")
+        holds = types.ModuleType("gungnir.holds")
+        for k, v in attrs.items():
+            setattr(holds, k, v)
+        pkg.holds = holds
+        return {"gungnir": pkg, "gungnir.holds": holds}
+
+    def test_an_old_gungnir_without_scoped_leaves_the_gate_off(self):
+        # 0.5.0 had ACCEPTED_TTL but no scoped/reset.
+        mods = self._fake_gungnir(ACCEPTED_TTL=1)
+        with mock.patch.dict(sys.modules, mods),              mock.patch.object(heimdall, "_in_browser", return_value=False):
+            self.assertIsNone(heimdall._holds())
+
+    def test_a_current_gungnir_turns_the_gate_on(self):
+        mods = self._fake_gungnir(ACCEPTED_TTL=1, scoped=len, reset=len)
+        with mock.patch.dict(sys.modules, mods),              mock.patch.object(heimdall, "_in_browser", return_value=False):
+            self.assertIs(heimdall._holds(), mods["gungnir.holds"])
+
+
 if __name__ == "__main__":
     unittest.main()
