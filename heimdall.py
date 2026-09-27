@@ -397,7 +397,9 @@ def _build_record(node_id: str, node_type: str, name: str,
 #   0.5.0 -> 0.6.0: nothing to port to the transport; only holds.py (per-key
 #   scopes, reset), its test, the changelog and the version changed. Both
 #   are consumed by the lazy holds gate below (v0.11.0).
-GUNGNIR_RECONCILED_AT = "0.6.0"
+#   0.6.0 -> 0.6.1: nothing to port; holds.save now writes 0600, which
+#   Heimdall inherits through the lazy import with no code change.
+GUNGNIR_RECONCILED_AT = "0.6.1"
 
 HOLDS_TOOL = "heimdall"
 HOLDS_SLOT = "meshcore_nodes"
