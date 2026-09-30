@@ -452,6 +452,26 @@ class PredictServerRejectsTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn("no_gps", warnings[0])
 
+    def test_half_zero_gps_flagged_as_no_gps(self):
+        # One real coordinate and one zero: the server rejects it as no_gps
+        # (issue #11), so the prediction has to say so too.
+        nodes = [self._node(lat=0.0, lon=-117.22637),
+                 self._node("94c0d6ab", lat=33.7, lon=0.0), self._node()]
+        warnings = heimdall.predict_server_rejects(nodes)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("2 of 3", warnings[0])
+        self.assertIn("no_gps", warnings[0])
+
+    def test_off_globe_coordinates_flagged(self):
+        # INT32_MAX / 1e6: nonzero, so it passes a zero check, and the server
+        # accepts it. It is warned about, not reported as no_gps.
+        nodes = [self._node(lat=51.0, lon=2147.483647), self._node()]
+        warnings = heimdall.predict_server_rejects(nodes)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("1 of 2", warnings[0])
+        self.assertIn("off the globe", warnings[0])
+        self.assertNotIn("no_gps", warnings[0])
+
     def test_both_gates_stack(self):
         nodes = [self._node("e4", 0.0, 0.0)]
         warnings = heimdall.predict_server_rejects(nodes)
@@ -823,6 +843,26 @@ class MeshcoreDbTests(unittest.TestCase):
 
     def test_no_gps_fix_is_dropped(self):
         db = _make_db(discovered=[_row(seed="c", lat=0, lon=0), _row(seed="d")])
+        recs = heimdall.parse_meshcore_db(db)
+        self.assertEqual([r["node_id"][0] for r in recs], ["d"])
+
+    def test_half_zero_fix_is_dropped(self):
+        # One zero coordinate is still no fix; the server rejects it as no_gps.
+        db = _make_db(discovered=[
+            _row(seed="c", lat=0, lon=-117_226_370),
+            _row(seed="e", lat=33_700_000, lon=0),
+            _row(seed="d")])
+        recs = heimdall.parse_meshcore_db(db)
+        self.assertEqual([r["node_id"][0] for r in recs], ["d"])
+
+    def test_int32_max_no_fix_sentinel_is_dropped(self):
+        # An unset int32 coordinate arrives as INT32_MAX. Scaled by 1e6 it is
+        # 2147.483647: nonzero, so a zero check lets it through, and the
+        # server accepted one and mapped it at longitude 2147 (issue #11).
+        db = _make_db(discovered=[
+            _row(seed="c", lon=2_147_483_647),
+            _row(seed="e", lat=2_147_483_647),
+            _row(seed="d")])
         recs = heimdall.parse_meshcore_db(db)
         self.assertEqual([r["node_id"][0] for r in recs], ["d"])
 
