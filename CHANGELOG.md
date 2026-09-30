@@ -4,6 +4,21 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The MeshCore app database coordinate gate** (issue #11). It only
+  dropped a row when BOTH coordinates were zero, so two shapes got through:
+  a half-zero fix, which the server then rejected as `no_gps`, and the
+  unset-int32 sentinel `INT32_MAX`, which scales to longitude 2147.483647,
+  passes a zero check, and was accepted and mapped. Coordinates are now
+  scaled before the gate, a zero in either one drops the row, and anything
+  off the globe (|lat| > 90 or |lon| > 180) is dropped too.
+- **`predict_server_rejects`** counts a half-zero fix as `no_gps` and warns
+  separately about coordinates off the globe, since that check is the only
+  coordinate check the CSV and offline JSON paths get.
+
 ## [0.11.0] - 2026-09-27 - Per-key holds and --reset-holds
 
 ### Added

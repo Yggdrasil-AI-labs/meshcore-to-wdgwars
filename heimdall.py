@@ -582,8 +582,10 @@ def predict_server_rejects(nodes: list[dict[str, Any]]) -> list[str]:
 
     Returns human-readable warning lines; empty when everything should pass.
     Mirrors the two gates a client can evaluate: node_id shape (8-16
-    lowercase hex) and a real GPS fix (not 0,0). The third gate, node_type,
-    coerces to Unknown server-side since 2026-07-03 and no longer rejects.
+    lowercase hex) and a real GPS fix (neither coordinate 0). The third
+    gate, node_type, coerces to Unknown server-side since 2026-07-03 and no
+    longer rejects. Also flags coordinates off the globe, which the server
+    accepts rather than rejects.
     """
     warnings: list[str] = []
     short = sum(1 for n in nodes
@@ -597,13 +599,31 @@ def predict_server_rejects(nodes: list[dict[str, Any]]) -> list[str]:
             f"to derive a longer one from. MeshCore's offline ping-log JSON "
             f"logs the key on DISC pings; the MeshMapper CSV export does not."
         )
-    no_gps = sum(1 for n in nodes if not n["lat"] and not n["lon"])
+    no_gps = sum(1 for n in nodes if not n["lat"] or not n["lon"])
     if no_gps:
         warnings.append(
-            f"{no_gps} of {len(nodes)} nodes have no GPS fix (lat/lon 0,0); "
-            f"the server will reject each of them as no_gps."
+            f"{no_gps} of {len(nodes)} nodes have no GPS fix (a zero latitude "
+            f"or longitude); the server will reject each of them as no_gps."
+        )
+    off_globe = sum(1 for n in nodes if n["lat"] and n["lon"]
+                    and _off_globe(n["lat"], n["lon"]))
+    if off_globe:
+        warnings.append(
+            f"{off_globe} of {len(nodes)} nodes have a coordinate off the "
+            f"globe (|lat| > 90 or |lon| > 180), usually an unset int32 read "
+            f"as a real value. The server accepts these and maps them nowhere "
+            f"real."
         )
     return warnings
+
+
+def _off_globe(lat: float, lon: float) -> bool:
+    """True when a coordinate cannot be a real position.
+
+    Catches the INT32_MAX no-fix sentinel once it is scaled (2147.483647),
+    which is nonzero and so slips past a zero check.
+    """
+    return abs(lat) > 90 or abs(lon) > 180
 
 
 def _node_token_to_record(token: str, timestamp: str,
@@ -1208,7 +1228,10 @@ def _meshcore_db_row_to_record(row: dict[str, Any]) -> dict[str, Any] | None:
     value this parser refuses to invent:
       * no public key, so there is no 16-hex node_id to derive and the server
         would silently drop it;
-      * no GPS fix (both coordinates zero), which the ingest gates on;
+      * no GPS fix: either coordinate zero (the server rejects a half-zero
+        fix as no_gps too), or a coordinate off the globe, which is what the
+        unset-int32 sentinel INT32_MAX becomes after scaling (lon 2147.483647)
+        and which the server would otherwise accept and map;
       * an unrecognised `type` integer - the mapping covers 1-4 and a 5 would
         be a role this parser has never seen, so it is left for a human
         rather than defaulted to REPEATER, which is what silently mislabelled
@@ -1220,12 +1243,10 @@ def _meshcore_db_row_to_record(row: dict[str, Any]) -> dict[str, Any] | None:
     if len(key) < PUBKEY_NODE_ID_HEX:
         return None
 
-    lat_raw = row.get("adv_lat") or 0
-    lon_raw = row.get("adv_lon") or 0
-    if not lat_raw and not lon_raw:
+    lat = _safe_float(row.get("adv_lat") or 0) / MESHCORE_DB_COORD_SCALE
+    lon = _safe_float(row.get("adv_lon") or 0) / MESHCORE_DB_COORD_SCALE
+    if not lat or not lon or _off_globe(lat, lon):
         return None
-    lat = _safe_float(lat_raw) / MESHCORE_DB_COORD_SCALE
-    lon = _safe_float(lon_raw) / MESHCORE_DB_COORD_SCALE
 
     try:
         node_type = MESHCORE_DB_NODE_TYPES[int(row.get("type"))]
