@@ -132,10 +132,20 @@ json.dumps({"records": records, "format": fmt})
     seenIds.add(r.node_id);
     return true;
   });
+  if (!parsed.records.length && parsed.format === "meshmapper-debug-log") {
+    setStatus(
+      `${file.name} is a MeshMapper debug log, but no node announced itself ` +
+      `(sent an advert with a position) while it was recording, so there is ` +
+      `nothing to upload. Each app session gets its own log: pick the one ` +
+      `from a drive, usually the larger files in About & Support.`,
+      "warn",
+    );
+    return;
+  }
   if (!parsed.records.length) {
     setStatus(
       `No meshcore nodes found in ${file.name}. ` +
-      `Expected a MeshMapper CSV export (flat "Logs → Copy CSV", or a ` +
+      `Expected a MeshMapper debug log, a MeshMapper CSV export (flat "Logs → Copy CSV", or a ` +
       `multi-section file with --- TX/RX/DISC Log --- blocks), a ` +
       `MeshCore offline ping-log .json, or the MeshCore app database. ` +
       `A database that parses to nothing usually means its nodes have no ` +
