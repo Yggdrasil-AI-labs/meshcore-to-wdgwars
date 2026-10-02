@@ -4,6 +4,28 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-10-01 - Read the MeshMapper debug log
+
+### Added
+
+- **MeshMapper debug logs are a new input** (`meshmapper-debug-<number>.txt`,
+  Settings -> About & Support in the app). MeshMapper's Copy CSV names nodes
+  by a 1-3 byte path hash, which wdgwars.pl rejects as `bad_node_id`, so a
+  MeshMapper drive could never count before. The debug log writes every
+  received packet out whole, and each ADVERT in it carries the node's full
+  public key and the position it claims. Heimdall decodes those adverts into
+  one record per node: 16-hex `node_id`, `public_key`, advertised name, role,
+  position, RSSI/SNR and hop count, keeping the most direct sighting. Checked
+  against a real drive: 13 adverts, 10 nodes, every one a full key and an
+  in-region position.
+- Detected by the log's opening banner, ahead of the `.txt` extension rule,
+  so the file needs no renaming. A plain CSV saved as `.txt` still parses as
+  CSV.
+- Packets MeshMapper marked DROPPED, non-advert packets, unknown roles,
+  missing or 0,0 positions and lines whose hex does not match the logged
+  length are all skipped. The advert signature is not verified (no Ed25519
+  in the stdlib).
+
 ## [0.11.0] - 2026-09-27 - Per-key holds and --reset-holds
 
 ### Added

@@ -87,3 +87,14 @@ than a broken fixture.
 Do **not** commit a real MeshCore app database. It holds every node the
 device ever heard, with coordinates, and unlike the CSV fixtures there is no
 zeroing pass that leaves it still useful.
+
+## MeshMapper debug log: no sample shipped
+
+There is deliberately no `meshmapper-debug-*.txt` here. A real one cannot be
+scrubbed the way the CSVs are: it carries the phone's own position at every
+connect, the app's session credentials, and decrypted channel messages, and
+the nodes in it parse only *because* their advertised positions are real, so
+zeroing those leaves nothing that parses. A synthetic one with made-up keys
+and positions would parse, and uploading it would put fictional nodes on the
+live map. The format is covered by synthetic packets in
+`tests/test_heimdall.py` (`MeshmapperDebugLogTests`) instead.

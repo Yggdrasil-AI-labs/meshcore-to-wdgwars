@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
@@ -1323,6 +1323,193 @@ def parse_meshcore_db(path: Path, since_days: float | None = None
 
 
 # ---------------------------------------------------------------------------
+# MeshMapper debug log parsing
+# ---------------------------------------------------------------------------
+#
+# MeshMapper (APP-1.4.0 at least) keeps a debug log per app session under
+# About & Support, shared out as meshmapper-debug-<epoch>.txt. Its "Copy CSV"
+# names a repeater only by a 1-3 byte path hash, which wdgwars.pl rejects as
+# bad_node_id, but the debug log writes every received packet out whole as
+# `[RX FILTER] Raw packet (N bytes): <hex>`. An ADVERT packet is the node
+# announcing itself, and its payload opens with the node's full 32-byte
+# public key and carries the position the node claims, so this is the one
+# MeshMapper output that can name a node the way the server wants.
+#
+# Only ADVERTs are read. Every other packet type names nodes by path hash
+# alone, and the log records where the *phone* was, not where the repeater
+# was, so a non-advert sighting has neither a server-legal id nor a node
+# position to send.
+#
+# MeshCore packet layout, as decoded against a real log (2026-10-01, one
+# drive, 13 adverts, every one parsing to a 64-hex key and an in-region
+# position):
+#
+#   header (1)            route type = bits 0-1, payload type = bits 2-5
+#   transport codes (4)   only for route types 0 and 3
+#   path_len (1)          hops = low 6 bits, bytes per hop = (top 2 bits) + 1
+#   path (hops * width)
+#   payload               ADVERT: pubkey (32), timestamp (4), signature (64),
+#                         flags (1), [lat i32 LE, lon i32 LE] if flags & 0x10,
+#                         [feat1 u16] if 0x20, [feat2 u16] if 0x40,
+#                         [name] if 0x80; flags & 0x0F is the node role.
+#
+# The advert signature is not verified: that needs Ed25519, and Heimdall is
+# stdlib-only. LoRa's own CRC has already discarded corrupt frames by the
+# time the app logs one, MeshMapper's own verdict is honoured (a packet it
+# marks DROPPED is skipped), and every field is range-checked here, so what
+# this does not catch is a deliberately forged advert, which a signature
+# check would catch and nothing else in the pipeline would.
+
+DEBUG_LOG_MAGIC = "=== MeshMapper Debug Log Started"
+
+_DEBUG_LINE_TS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})")
+_DEBUG_RAW_RE = re.compile(r"\[RX FILTER\] Raw packet \((\d+) bytes\): ([0-9A-Fa-f ]+)")
+_DEBUG_META_RE = re.compile(r"\[RX PARSE\] Parsed metadata: .*?SNR=(-?[\d.]+), RSSI=(-?\d+)")
+_DEBUG_DROPPED_RE = re.compile(r"\[RX FILTER\] \W*DROPPED")
+
+ADVERT_PAYLOAD_TYPE = 0x04
+_TRANSPORT_ROUTE_TYPES = (0x00, 0x03)
+_ADVERT_FIXED_LEN = 32 + 4 + 64   # pubkey, timestamp, signature
+_ADV_LATLON = 0x10
+_ADV_FEAT1 = 0x20
+_ADV_FEAT2 = 0x40
+_ADV_NAME = 0x80
+
+
+def decode_advert(packet: bytes) -> dict[str, Any] | None:
+    """Decode one raw MeshCore packet if it is a well-formed ADVERT with a
+    position, else None.
+
+    Returns public_key (64 hex), role (MESHCORE_DB_NODE_TYPES name), lat,
+    lon, name, path_hops and path_length. Rejects rather than guesses: a
+    role outside 1-4, a missing or 0,0 or out-of-range position, a name that
+    is not valid UTF-8, or a length that does not add up all return None,
+    the same refusals parse_meshcore_db makes for the same fields.
+    """
+    if len(packet) < 2:
+        return None
+    header = packet[0]
+    if (header >> 2) & 0x0F != ADVERT_PAYLOAD_TYPE:
+        return None
+    off = 1
+    if header & 0x03 in _TRANSPORT_ROUTE_TYPES:
+        off += 4
+    if off >= len(packet):
+        return None
+    path_len = packet[off]
+    hops = path_len & 0x3F
+    path_bytes = hops * ((path_len >> 6) + 1)
+    off += 1 + path_bytes
+    payload = packet[off:]
+    if len(payload) < _ADVERT_FIXED_LEN + 1:
+        return None
+    key = payload[:32]
+    if len(set(key)) == 1:   # all-zero / all-FF is not a key
+        return None
+    app = payload[_ADVERT_FIXED_LEN:]
+    flags = app[0]
+    role = MESHCORE_DB_NODE_TYPES.get(flags & 0x0F)
+    if role is None or not flags & _ADV_LATLON:
+        return None
+    pos = 1
+    if len(app) < pos + 8:
+        return None
+    lat_i, lon_i = int.from_bytes(app[pos:pos + 4], "little", signed=True), \
+        int.from_bytes(app[pos + 4:pos + 8], "little", signed=True)
+    pos += 8
+    lat = lat_i / MESHCORE_DB_COORD_SCALE
+    lon = lon_i / MESHCORE_DB_COORD_SCALE
+    if (not lat and not lon) or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    pos += (2 if flags & _ADV_FEAT1 else 0) + (2 if flags & _ADV_FEAT2 else 0)
+    if pos > len(app):
+        return None
+    name = ""
+    if flags & _ADV_NAME:
+        try:
+            name = app[pos:].split(b"\x00", 1)[0].decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return None
+    return {
+        "public_key": key.hex(), "role": role, "lat": lat, "lon": lon,
+        "name": name, "path_hops": hops, "path_length": path_bytes,
+    }
+
+
+def _debug_sighting_rank(rec: dict[str, Any]) -> tuple[int, float]:
+    """Order sightings of one node: fewest hops first (the server lets the
+    most direct sighting own a node's position), then strongest RSSI."""
+    rssi = rec.get("rssi")
+    return (rec.get("path_hops", 99), -(rssi if rssi is not None else -999))
+
+
+def parse_meshmapper_debug_text(text: str) -> list[dict[str, Any]]:
+    """Parse a MeshMapper debug log to one record per advertising node.
+
+    A node usually adverts several times in a drive. The best sighting is
+    kept (see _debug_sighting_rank), ties going to the earliest, so the CLI's
+    first-wins collapse never has to choose between them.
+    """
+    best: dict[str, dict[str, Any]] = {}
+    snr = rssi = None
+    pending: dict[str, Any] | None = None
+
+    def _commit() -> None:
+        if pending is None:
+            return
+        prior = best.get(pending["node_id"])
+        if prior is None or _debug_sighting_rank(pending) < _debug_sighting_rank(prior):
+            best[pending["node_id"]] = pending
+
+    for line in text.splitlines():
+        m = _DEBUG_META_RE.search(line)
+        if m:
+            snr, rssi = float(m.group(1)), float(m.group(2))
+            continue
+        m = _DEBUG_RAW_RE.search(line)
+        if m:
+            _commit()
+            pending = None
+            ts = _DEBUG_LINE_TS_RE.match(line)
+            try:
+                packet = bytes.fromhex(m.group(2))
+            except ValueError:
+                packet = b""
+            # A line cut short (a truncated log, a paste) must not decode as
+            # a shorter packet: the length the app logged has to match.
+            adv = (decode_advert(packet)
+                   if ts and len(packet) == int(m.group(1)) else None)
+            if adv is not None:
+                pending = _build_record(
+                    derive_node_id(adv["public_key"], ""), adv["role"],
+                    adv["name"], adv["lat"], adv["lon"], rssi, snr,
+                    ts.group(1), public_key=adv["public_key"],
+                    path_hops=adv["path_hops"],
+                    path_length=adv["path_length"])
+            snr = rssi = None
+            continue
+        if pending is not None and _DEBUG_DROPPED_RE.search(line):
+            pending = None
+    _commit()
+    return list(best.values())
+
+
+def parse_meshmapper_debug(path: Path) -> list[dict[str, Any]]:
+    return parse_meshmapper_debug_text(
+        path.read_text(encoding="utf-8", errors="replace"))
+
+
+def _is_meshmapper_debug(path: Path) -> bool:
+    """True if the file opens with MeshMapper's debug-log banner."""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(256).decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    return head.lstrip("﻿ \r\n").startswith(DEBUG_LOG_MAGIC)
+
+
+# ---------------------------------------------------------------------------
 # Format dispatch
 # ---------------------------------------------------------------------------
 
@@ -1352,6 +1539,8 @@ def parse_file(path: Path, since_days: float | None = None
     """
     if _is_sqlite(path):
         return parse_meshcore_db(path, since_days), "meshcore-app-db"
+    if _is_meshmapper_debug(path):
+        return parse_meshmapper_debug(path), "meshmapper-debug-log"
     suffix = path.suffix.lower()
     if suffix == ".json":
         return parse_offline_json(path), "meshcore-offline-json"

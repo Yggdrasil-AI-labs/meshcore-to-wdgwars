@@ -97,8 +97,8 @@ After setup, you can run uploads with no key flags at all. Windows users can dou
 
 ### The day-to-day workflow
 
-1. In MeshMapper (or your Meshcore capture tool), export the RX log to CSV (in MeshMapper that's **Logs → Copy CSV**).
-2. Save it as a `.csv` file on disk.
+1. In MeshMapper, open **Settings → About & Support**, find the debug log for your drive (`meshmapper-debug-<number>.txt`) and share it to your computer. This is the MeshMapper output that gets your nodes counted; see the note under [Supported input formats](#supported-input-formats). (**Logs → Copy CSV** still parses, but its nodes have short IDs the server rejects.)
+2. Save it on disk under any name.
 3. Run `python3 heimdall.py path/to/your_export.csv --preview` to see how Heimdall normalises the rows.
 4. When the preview looks right, upload (see below).
 
@@ -201,12 +201,15 @@ Heimdall never phones home on its own. If you want to know whether a newer relea
 | **MeshMapper flat "Copy CSV"** | Single header row `timestamp,repeater_id,snr,rssi,...` | MeshMapper app, RX log export |
 | **MeshMapper multi-section CSV** | `--- TX/RX/DISC Log ---` marker blocks, each with its own header | MeshMapper full log export |
 | **MeshCore offline ping-log JSON** | `.json` with a top-level `pings[]` array (`DISC` / `RX` / any key-bearing ping) | meshcore-ha / MeshCore offline capture |
+| **MeshMapper debug log** | Opens with `=== MeshMapper Debug Log Started`, any filename | MeshMapper, Settings → About & Support, one `meshmapper-debug-<number>.txt` per app session |
 | **MeshCore app database (SQLite)** | `SQLite format 3` file magic, any filename, with a `discovered_contacts` or `contacts` table | A database file exported out of the MeshCore app (see the note below) |
 | _Meshcore Companion serial dump_ | _Planned_ | T-Beam / Heltec / Wio Tracker via USB serial |
 | _Raw MQTT capture_ | _Planned_ | `mosquitto_sub` against a Meshcore broker |
 | _Cardputer ADV LoRa cap log_ | _Planned_ | M5Stack Cardputer Advanced with LoRa module |
 
-Format is auto-detected (SQLite magic first, then extension, then a content sniff). One `DISC`/`RX`/`TX` observation becomes one node record. **Note:** the CSV `TX`/`RX`/`DISC` sections log SNR and the receiver's noise floor but no per-node RSSI, so those records carry `rssi: null`; the offline-JSON `DISC` pings include real `local_rssi`. See [`examples/`](examples/) for a scrubbed sample of each format.
+Format is auto-detected (SQLite magic first, then the MeshMapper debug-log banner, then extension, then a content sniff). One `DISC`/`RX`/`TX` observation becomes one node record. **Note:** the CSV `TX`/`RX`/`DISC` sections log SNR and the receiver's noise floor but no per-node RSSI, so those records carry `rssi: null`; the offline-JSON `DISC` pings include real `local_rssi`. See [`examples/`](examples/) for a scrubbed sample of each format.
+
+**From MeshMapper, send the debug log, not Copy CSV.** The debug log writes every packet the radio heard out in full, and when a node announces itself (an ADVERT) that packet carries its full public key and the position it claims. Heimdall reads only those adverts, so you get one record per node that announced itself during the drive, with a server-legal 16-hex `node_id`, its advertised name, role, position, RSSI/SNR and hop count. If a node was heard more than once, the most direct sighting is kept. Other packet types are skipped: they name a node only by a short path hash, and the log records where your phone was, not where that node was. Packets MeshMapper itself marked DROPPED are skipped too. The advert signature is not checked (that needs Ed25519, and Heimdall has no dependencies), so a deliberately forged advert would get through; anything malformed, positionless or out of range is refused.
 
 **If you have the app database, use it.** It is a strict superset of the app's own JSON export, and a large one: checked against a real capture, everything in the export was also in the database, while a large majority of the database's nodes carrying both a fix and a key never reached the export at all. It carries a full public key on every node, which is what gets you a server-legal 16-hex `node_id`, and a `last_advert` timestamp so `--since-days N` can hold back a stale back catalogue instead of you trimming the file by hand.
 
@@ -229,7 +232,7 @@ Two guard rails:
 - The key is only used when it actually starts with the short ID the capture heard, so a mispaired key never renames a node into someone else's identity.
 - Sightings that name a node by short ID alone (offline-JSON `RX` tokens) resolve against the keys found elsewhere in the *same* capture, and only when exactly one node matches that prefix.
 
-A MeshMapper CSV export carries no keys at all, so its nodes keep their short IDs and Heimdall warns that the server will reject them. This approach was contributed by [@nicolasrata](https://github.com/nicolasrata) in [issue #1](https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/issues/1).
+A MeshMapper CSV export carries no keys at all, so its nodes keep their short IDs and Heimdall warns that the server will reject them. Use the MeshMapper debug log instead. This approach was contributed by [@nicolasrata](https://github.com/nicolasrata) in [issue #1](https://github.com/Yggdrasil-AI-labs/meshcore-to-wdgwars/issues/1).
 
 ---
 

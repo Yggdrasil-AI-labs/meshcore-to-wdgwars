@@ -942,5 +942,111 @@ class MeshcoreDbTests(unittest.TestCase):
         self.assertEqual(fmt, "meshmapper-csv")
 
 
+def _advert(seed: int = 1, role: int = 2, lat: float = 32.9, lon: float = -117.2,
+            name: str = "Example Repeater", hops: int = 3, width: int = 1,
+            route: int = 1, flags_extra: int = 0) -> bytes:
+    """Build a synthetic MeshCore ADVERT packet in the on-air layout."""
+    header = (heimdall.ADVERT_PAYLOAD_TYPE << 2) | route
+    out = bytes([header])
+    if route in (0, 3):
+        out += b"\x01\x02\x03\x04"
+    out += bytes([((width - 1) << 6) | hops]) + bytes(range(hops * width))
+    out += bytes((seed + i) % 256 for i in range(32))       # pubkey
+    out += b"\x00" * 4 + b"\xAA" * 64                        # timestamp, sig
+    flags = role | 0x10 | 0x80 | flags_extra
+    out += bytes([flags])
+    out += int(round(lat * 1e6)).to_bytes(4, "little", signed=True)
+    out += int(round(lon * 1e6)).to_bytes(4, "little", signed=True)
+    if flags_extra & 0x20:
+        out += b"\x00\x00"
+    if flags_extra & 0x40:
+        out += b"\x00\x00"
+    return out + name.encode("utf-8")
+
+
+def _debug_log(*packets: tuple[bytes, int, str]) -> str:
+    """Wrap (packet, rssi, verdict) triples in MeshMapper debug-log lines."""
+    lines = [heimdall.DEBUG_LOG_MAGIC + ": 2026-09-29T08:47:33.119024 ===",
+             "=== App APP-1.4.0 | Android 16 (SDK 36) | example ===", ""]
+    for i, (pkt, rssi, verdict) in enumerate(packets):
+        ts = f"[2026-09-29T08:5{i}:00.000000] LOG: "
+        lines.append(ts + f"[RX PARSE] Parsed metadata: header=0x11, "
+                          f"SNR=3.25, RSSI={rssi}, payload=1 bytes")
+        hexed = " ".join(f"{b:02X}" for b in pkt)
+        lines.append(ts + f"[RX FILTER] Raw packet ({len(pkt)} bytes): {hexed}")
+        lines.append(ts + f"[RX FILTER] {verdict}: ADVERT")
+    return "\n".join(lines) + "\n"
+
+
+class MeshmapperDebugLogTests(unittest.TestCase):
+    def _write(self, text: str, name: str = "meshmapper-debug-1.txt") -> Path:
+        path = Path(tempfile.mkdtemp()) / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_advert_yields_full_key_node_id(self):
+        rec = heimdall.parse_meshmapper_debug_text(
+            _debug_log((_advert(seed=0xC9), -113, "KEPT")))[0]
+        self.assertEqual(len(rec["public_key"]), 64)
+        self.assertEqual(rec["node_id"], rec["public_key"][:16])
+        self.assertEqual(rec["node_type"], "REPEATER")
+        self.assertEqual(rec["name"], "Example Repeater")
+        self.assertAlmostEqual(rec["lat"], 32.9)
+        self.assertAlmostEqual(rec["lon"], -117.2)
+        self.assertEqual(rec["rssi"], -113.0)
+        self.assertEqual(rec["first_seen"], "2026-09-29 08:50:00")
+        self.assertEqual((rec["path_hops"], rec["path_length"]), (3, 3))
+        self.assertEqual(heimdall.predict_server_rejects([rec]), [])
+
+    def test_multibyte_path_hashes_and_transport_codes(self):
+        rec = heimdall.decode_advert(_advert(hops=6, width=2, route=0,
+                                             flags_extra=0x20 | 0x40))
+        self.assertEqual((rec["path_hops"], rec["path_length"]), (6, 12))
+        self.assertEqual(rec["name"], "Example Repeater")
+
+    def test_most_direct_sighting_wins(self):
+        text = _debug_log((_advert(hops=8), -100, "KEPT"),
+                          (_advert(hops=2), -120, "KEPT"),
+                          (_advert(hops=2), -110, "KEPT"))
+        recs = heimdall.parse_meshmapper_debug_text(text)
+        self.assertEqual(len(recs), 1)
+        self.assertEqual((recs[0]["path_hops"], recs[0]["rssi"]), (2, -110.0))
+
+    def test_dropped_packet_is_skipped(self):
+        text = _debug_log((_advert(seed=1), -100, "❌ DROPPED"),
+                          (_advert(seed=2), -100, "✅ KEPT"))
+        recs = heimdall.parse_meshmapper_debug_text(text)
+        self.assertEqual(len(recs), 1)
+        self.assertTrue(recs[0]["public_key"].startswith("02"))
+
+    def test_refuses_what_it_cannot_send_honestly(self):
+        bad = [_advert(role=7), _advert(lat=0, lon=0), _advert(lat=95)]
+        no_pos = bytearray(_advert())
+        no_pos[2 + 3 + 100] &= ~0x10 & 0xFF   # clear the lat/lon flag
+        bad.append(bytes(no_pos))
+        for pkt in bad:
+            self.assertIsNone(heimdall.decode_advert(pkt))
+
+    def test_non_advert_and_truncated_lines_are_ignored(self):
+        text_msg = bytes([0x15, 0x01, 0x85]) + b"\x00" * 40
+        cut = _debug_log((_advert(), -100, "KEPT")).replace(" bytes): ", " bytes): FF ", 1)
+        self.assertEqual(heimdall.parse_meshmapper_debug_text(
+            _debug_log((text_msg, -100, "KEPT"))), [])
+        self.assertEqual(heimdall.parse_meshmapper_debug_text(cut), [])
+
+    def test_dispatch_sniffs_banner_ahead_of_txt_extension(self):
+        path = self._write(_debug_log((_advert(), -100, "KEPT")))
+        recs, fmt = heimdall.parse_file(path)
+        self.assertEqual(fmt, "meshmapper-debug-log")
+        self.assertEqual(len(recs), 1)
+
+    def test_plain_txt_csv_still_parses_as_csv(self):
+        path = self._write("timestamp,repeater_id,snr,rssi,latitude,longitude\n"
+                           "2026-07-02T18:39:27,0CE8,0.5,-101,48.7,2.07\n",
+                           name="export.txt")
+        _, fmt = heimdall.parse_file(path)
+        self.assertEqual(fmt, "meshmapper-csv")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
