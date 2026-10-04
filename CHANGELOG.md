@@ -4,6 +4,21 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.12.1] - 2026-10-04 - Stop claiming known nodes are yours
+
+### Fixed
+
+- **The upload summary no longer says known nodes are "already on your
+  account".** `meshcore_already_seen` means already in the server's
+  database under any player, and the first finder keeps a node, so a player
+  could be told 10 nodes were theirs while their account showed zero. The
+  server now splits known nodes into `meshcore_yours_known` and
+  `meshcore_owned_by_others`; the CLI and the web page report them as
+  "0 new, 3 already yours, 7 first found by other players". A server that
+  does not send the split gets "already known to the server" instead.
+- **The already-sent gate says "uploaded from here recently"** instead of
+  "already on your account", since a held node may belong to another finder.
+
 ## [0.12.0] - 2026-10-01 - Read the MeshMapper debug log
 
 ### Added

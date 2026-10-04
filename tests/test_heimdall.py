@@ -1050,3 +1050,15 @@ class MeshmapperDebugLogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_known_breakdown_splits_by_finder():
+    data = {"meshcore_yours_known": 3, "meshcore_owned_by_others": 7}
+    msg = heimdall._known_breakdown(data, 0, 10)
+    assert msg == "0 new, 3 already yours, 7 first found by other players"
+
+
+def test_known_breakdown_never_claims_ownership_without_split():
+    msg = heimdall._known_breakdown({}, 2, 9)
+    assert "your account" not in msg and "yours" not in msg
+    assert "9 already known to the server" in msg

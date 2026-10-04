@@ -245,7 +245,8 @@ uploadBtn.addEventListener("click", async () => {
   const chunks = Math.ceil(records.length / BATCH);
   const dryRun = dryrunEl.checked;
   uploadBtn.disabled = true;
-  let totalImported = 0, totalSeen = 0;
+  let totalImported = 0, totalSeen = 0, totalYours = 0, totalOthers = 0;
+  let splitKnown = true;
   let dryLog = "";
   if (dryRun) {
     dryOutputEl.textContent = "";
@@ -312,6 +313,14 @@ json.dumps({"data": _data_b64, "nonce": _nonce, "sig": _sig})
         const data = JSON.parse(txt);
         totalImported += data.meshcore_imported || 0;
         totalSeen += data.meshcore_already_seen || 0;
+        // Split known nodes by finder when the server reports it (2026-10-04).
+        if (typeof data.meshcore_yours_known === "number" &&
+            typeof data.meshcore_owned_by_others === "number") {
+          totalYours += data.meshcore_yours_known;
+          totalOthers += data.meshcore_owned_by_others;
+        } else {
+          splitKnown = false;
+        }
       } catch (_) { /* server returned non-JSON; ignore counters */ }
     }
     if (dryRun) {
@@ -324,7 +333,10 @@ json.dumps({"data": _data_b64, "nonce": _nonce, "sig": _sig})
       );
     } else {
       setUploadStatus(
-        `Done, ${records.length} nodes sent, ${totalImported} imported, ${totalSeen} already-seen.`,
+        `Done, ${records.length} nodes sent: ${totalImported} new, ` +
+        (splitKnown
+          ? `${totalYours} already yours, ${totalOthers} first found by other players.`
+          : `${totalSeen} already known to the server.`),
         "ok",
       );
     }

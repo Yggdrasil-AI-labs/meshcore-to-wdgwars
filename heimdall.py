@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
@@ -472,6 +472,23 @@ def _sighting_key(node: dict[str, Any]) -> str | None:
     if not node_id or not seen:
         return None
     return f"{(node.get('network') or '').strip().lower()}|{node_id}|{seen}"
+
+
+def _known_breakdown(data: dict[str, Any], imp: int, seen: int) -> str:
+    """Say what an upload's known nodes were without claiming they are yours.
+
+    meshcore_already_seen means "already in the server's database", under
+    any player, and the first finder keeps a node. Since 2026-10-04 the
+    server splits known nodes into meshcore_yours_known and
+    meshcore_owned_by_others (both additive). A server without them gets
+    the neutral wording rather than a guess at ownership.
+    """
+    yours = data.get("meshcore_yours_known")
+    others = data.get("meshcore_owned_by_others")
+    if isinstance(yours, int) and isinstance(others, int):
+        return (f"{imp} new, {yours} already yours, "
+                f"{others} first found by other players")
+    return f"{imp} new meshcore nodes, {seen} already known to the server"
 
 
 def filter_already_sent(
@@ -2398,11 +2415,11 @@ def main(argv: list[str] | None = None) -> int:
         if held_back:
             if not nodes:
                 print(f"[heimdall] nothing new to send: all {held_back} "
-                      f"node(s) are already on your account. Skipping "
+                      f"node(s) were uploaded from here recently. Skipping "
                       f"upload.", file=sys.stderr)
                 return 0
-            print(f"[heimdall] {held_back} node(s) already on your account, "
-                  f"sending {len(nodes)}.", file=sys.stderr)
+            print(f"[heimdall] {held_back} node(s) uploaded from here "
+                  f"recently, sending {len(nodes)}.", file=sys.stderr)
 
     if not key:
         print("missing API key: pass --key, set WDGWARS_API_KEY, or run "
@@ -2445,7 +2462,7 @@ def main(argv: list[str] | None = None) -> int:
                 if accounted is not None:
                     accounted += imp + seen + rejected
                 print(f"{_OK()} accepted by wdgwars.pl. "
-                      f"{imp} new meshcore nodes, {seen} already on your account.",
+                      f"{_known_breakdown(data, imp, seen)}.",
                       file=sys.stderr)
                 if rejected:
                     print(f"  {rejected} rejected: {reasons}", file=sys.stderr)
