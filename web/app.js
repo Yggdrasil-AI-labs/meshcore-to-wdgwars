@@ -312,7 +312,7 @@ json.dumps({"data": _data_b64, "nonce": _nonce, "sig": _sig})
       try {
         const data = JSON.parse(txt);
         totalImported += data.meshcore_imported || 0;
-        totalSeen += data.meshcore_already_seen || 0;
+        totalSeen += (data.meshcore_already_seen || 0) + (data.meshcore_merged || 0);
         // Split known nodes by finder when the server reports it (2026-10-04).
         if (typeof data.meshcore_yours_known === "number" &&
             typeof data.meshcore_owned_by_others === "number") {

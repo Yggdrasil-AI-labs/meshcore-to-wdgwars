@@ -491,6 +491,17 @@ class UnaccountedNodesNoteTests(unittest.TestCase):
              "meshcore_reject_reasons": {"bad_node_id": 1}}))
         self.assertNotIn("no verdict", stderr)
 
+    def test_merged_nodes_count_as_accounted(self):
+        # yours_known + owned_by_others == already_seen + merged (2026-10-04).
+        stderr = self._run_main(json.dumps(
+            {"meshcore_imported": 0, "meshcore_already_seen": 1,
+             "meshcore_merged": 1, "meshcore_rejected": 0,
+             "meshcore_yours_known": 1, "meshcore_owned_by_others": 1}))
+        self.assertNotIn("no verdict", stderr)
+        self.assertIn("0 new, 1 already yours, 1 first found by other players",
+                      stderr)
+        self.assertNotIn("on your account", stderr)
+
     def test_repeat_sightings_collapse_before_upload(self):
         stderr = self._run_main(json.dumps(
             {"meshcore_imported": 2, "meshcore_already_seen": 0,

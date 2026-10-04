@@ -16,6 +16,11 @@ All notable changes to Heimdall are documented here. Format follows
   `meshcore_owned_by_others`; the CLI and the web page report them as
   "0 new, 3 already yours, 7 first found by other players". A server that
   does not send the split gets "already known to the server" instead.
+- **Merged nodes no longer trip the "gave no verdict" warning.** The
+  server reports some known nodes as `meshcore_merged` rather than
+  `meshcore_already_seen`; Heimdall left them out of its tally and would have
+  told the player they were NOT imported. They count as known now, in the CLI
+  and the web page.
 - **The already-sent gate says "uploaded from here recently"** instead of
   "already on your account", since a held node may belong to another finder.
 

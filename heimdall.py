@@ -2456,13 +2456,17 @@ def main(argv: list[str] | None = None) -> int:
                 deliberate_skip = deliberate_skip or _deliberate_skip(data)
                 imp = data.get("meshcore_imported", 0)
                 seen = data.get("meshcore_already_seen", 0)
+                # Known nodes the server folded into an existing record;
+                # LOCOSP 2026-10-04: yours_known + owned_by_others equals
+                # already_seen + merged, so these are accounted for too.
+                merged = data.get("meshcore_merged", 0)
                 rejected = data.get("meshcore_rejected", 0)
                 reasons = data.get("meshcore_reject_reasons") or {}
                 badges = data.get("new_badges") or []
                 if accounted is not None:
-                    accounted += imp + seen + rejected
+                    accounted += imp + seen + merged + rejected
                 print(f"{_OK()} accepted by wdgwars.pl. "
-                      f"{_known_breakdown(data, imp, seen)}.",
+                      f"{_known_breakdown(data, imp, seen + merged)}.",
                       file=sys.stderr)
                 if rejected:
                     print(f"  {rejected} rejected: {reasons}", file=sys.stderr)
@@ -2501,7 +2505,7 @@ def main(argv: list[str] | None = None) -> int:
     elif accounted is not None and accounted < len(nodes):
         print(f"[heimdall] note: the server's counters account for "
               f"{accounted} of the {len(nodes)} submitted nodes (imported + "
-              f"already seen + rejected), and gave no verdict for the other "
+              f"already seen + merged + rejected), and gave no verdict for the other "
               f"{len(nodes) - accounted}. Seen live when re-submitting a "
               f"payload it had just itemised as rejected (issue #1); the "
               f"unaccounted nodes were NOT imported.", file=sys.stderr)
