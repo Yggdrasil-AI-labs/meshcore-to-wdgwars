@@ -4,6 +4,20 @@ All notable changes to Heimdall are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] - 2026-10-14 - Opt-in release notice
+
+### Added
+
+- **`--update-notice on|off`, and one question at `--setup`.** Players
+  kept running old builds without knowing a fix was out (0.12.0 was still
+  telling people known mesh nodes were "already on your account" ten days
+  after 0.12.1 fixed it). With the notice on, Heimdall asks GitHub at most
+  once a day, after a successful upload, whether a newer release exists,
+  and prints one line if so. It is **off by default**: the setup question
+  defaults to no, and a missing or unreadable setting counts as off, so
+  the v0.6.0 promise holds for anyone who does not opt in. A failed check
+  stays silent.
+
 ## [0.12.1] - 2026-10-04 - Stop claiming known nodes are yours
 
 ### Fixed

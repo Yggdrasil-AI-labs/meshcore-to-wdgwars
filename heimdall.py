@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 
-__version__ = "0.12.1"
+__version__ = "0.13.0"
 GITHUB_REPO = "Yggdrasil-AI-labs/meshcore-to-wdgwars"
 
 # /endpoint/* is the server-side alias of /api/*: same router, same HMAC
@@ -691,6 +691,45 @@ def _config_dir() -> Path:
 
 def _key_path() -> Path:
     return _config_dir() / "api.key"
+
+
+def _update_notice_path() -> Path:
+    return _config_dir() / "update-notice"
+
+
+def _update_notice_enabled() -> bool:
+    """Whether the operator opted in to the post-upload release notice.
+
+    Off unless the file says exactly "on": a missing, unreadable or garbled
+    setting must never turn a GitHub request on by itself.
+    """
+    try:
+        return _update_notice_path().read_text(encoding="utf-8").strip() == "on"
+    except OSError:
+        return False
+
+
+def _set_update_notice(on: bool) -> None:
+    path = _update_notice_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("on\n" if on else "off\n", encoding="utf-8")
+
+
+def _ask_update_notice() -> None:
+    """One question at --setup. Default is no, so Enter keeps the promise
+    that nothing contacts GitHub unless the operator asked for it."""
+    print("", file=sys.stderr)
+    print(" Heimdall can tell you when a new release is out. If you say yes,",
+          file=sys.stderr)
+    print(" after an upload it asks GitHub at most once a day whether a newer",
+          file=sys.stderr)
+    print(" version exists. Nothing else is sent. Change it any time with",
+          file=sys.stderr)
+    print(" --update-notice on / --update-notice off.", file=sys.stderr)
+    on = _prompt_yes_no(" Tell me when a new Heimdall release is out?",
+                        default=False)
+    _set_update_notice(on)
+    print(f" Release notice {'on' if on else 'off'}.", file=sys.stderr)
 
 
 def load_key(cli_key: str | None) -> str:
@@ -1649,8 +1688,9 @@ def _is_newer(latest: str, current: str) -> bool:
 def _check_for_update(force: bool = False) -> str | None:
     """Quick non-blocking version check against the GitHub releases API.
 
-    Only ever reached from --check-version or --update: nothing calls this on
-    an ordinary run. Cached for 24h in the user's config dir so repeated
+    Reached from --check-version, --update, and after an upload ONLY when the
+    operator opted in with --update-notice on (or said yes at --setup).
+    Nothing calls it on an ordinary run otherwise. Cached for 24h in the user's config dir so repeated
     --update attempts do not hammer the API; `force` skips the cache so an
     operator who explicitly asked gets a fresh answer rather than a stale one.
     Returns the latest tag if newer than __version__, else None."""
@@ -2260,8 +2300,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-q", "--quiet", action="store_true",
                    help="suppress informational banners (errors still print)")
     p.add_argument("--check-version", action="store_true",
-                   help="ask GitHub whether a newer release exists, then exit "
-                        "(the only thing here that contacts GitHub on its own)")
+                   help="ask GitHub whether a newer release exists, then exit")
+    p.add_argument("--update-notice", choices=("on", "off"),
+                   help="on: after an upload, ask GitHub at most once a day "
+                        "whether a newer release exists and say so. Off by "
+                        "default. Saves the choice and exits.")
     p.add_argument("--no-version-check", action="store_true",
                    help=argparse.SUPPRESS)  # accepted for compatibility; no
     # automatic check happens any more, so this is a no-op. Existing cron
@@ -2329,7 +2372,14 @@ def main(argv: list[str] | None = None) -> int:
     # --quiet / --no-version-check as the opt-out, which disclosed the user's
     # IP, their exact version and a rough daily usage cadence to GitHub
     # without ever asking. Nothing here talks to a third party unless the
-    # operator typed a command that says so.
+    # operator typed a command that says so, or opted in to the post-upload
+    # release notice (--update-notice on, or yes at --setup; default off).
+    if args.update_notice:
+        _set_update_notice(args.update_notice == "on")
+        print(f"[heimdall] release notice {args.update_notice}.",
+              file=sys.stderr)
+        return 0
+
     if args.check_version:
         newer = _check_for_update(force=True)
         if newer:
@@ -2345,7 +2395,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Key management modes, handled before requiring an input file.
     if args.setup:
-        return interactive_setup()
+        rc = interactive_setup()
+        if rc == 0:
+            _ask_update_notice()
+        return rc
     if args.save_key:
         save_key(args.save_key)
         return 0
@@ -2511,7 +2564,21 @@ def main(argv: list[str] | None = None) -> int:
               f"unaccounted nodes were NOT imported.", file=sys.stderr)
     if rc == 0 and not args.dry_run:
         record_sent_nodes(nodes, sent_at, key)
+        _post_upload_update_notice()
     return rc
+
+
+def _post_upload_update_notice() -> None:
+    """Opt-in only (--update-notice on). The 24h cache in _check_for_update
+    keeps this to one GitHub request a day however often the operator
+    uploads, and a failed check stays silent rather than delaying them."""
+    if not _update_notice_enabled():
+        return
+    newer = _check_for_update()
+    if newer:
+        print(f"{_INFO()} Heimdall v{newer} is out (you're on "
+              f"v{__version__}). Run update.bat / update.sh, or --update.",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":

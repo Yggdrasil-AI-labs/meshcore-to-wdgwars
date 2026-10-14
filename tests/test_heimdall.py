@@ -574,6 +574,70 @@ class VersionTests(unittest.TestCase):
         self.assertFalse(heimdall._is_newer("0.4.0", "not-a-version"))
 
 
+class UpdateNoticeTests(unittest.TestCase):
+    """v0.13.0: the post-upload release notice is opt-in. Off must mean no
+    GitHub request at all, which is the v0.6.0 promise in the README."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        patcher = unittest.mock.patch.object(
+            heimdall, "_config_dir", return_value=Path(self._tmp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_missing_setting_is_off(self):
+        self.assertFalse(heimdall._update_notice_enabled())
+
+    def test_garbled_setting_is_off(self):
+        heimdall._update_notice_path().write_text("yes please", encoding="utf-8")
+        self.assertFalse(heimdall._update_notice_enabled())
+
+    def test_on_and_off_round_trip(self):
+        heimdall._set_update_notice(True)
+        self.assertTrue(heimdall._update_notice_enabled())
+        heimdall._set_update_notice(False)
+        self.assertFalse(heimdall._update_notice_enabled())
+
+    def test_off_never_contacts_github(self):
+        with unittest.mock.patch.object(heimdall, "_check_for_update") as chk:
+            heimdall._post_upload_update_notice()
+        chk.assert_not_called()
+
+    def test_on_prints_newer_release(self):
+        heimdall._set_update_notice(True)
+        err = unittest.mock.MagicMock()
+        with unittest.mock.patch.object(heimdall, "_check_for_update",
+                                        return_value="9.9.9"),                 unittest.mock.patch.object(sys, "stderr", err):
+            heimdall._post_upload_update_notice()
+        printed = "".join(c.args[0] for c in err.write.call_args_list)
+        self.assertIn("v9.9.9 is out", printed)
+
+    def test_on_and_current_prints_nothing(self):
+        heimdall._set_update_notice(True)
+        err = unittest.mock.MagicMock()
+        with unittest.mock.patch.object(heimdall, "_check_for_update",
+                                        return_value=None),                 unittest.mock.patch.object(sys, "stderr", err):
+            heimdall._post_upload_update_notice()
+        err.write.assert_not_called()
+
+    def test_setup_question_defaults_to_no(self):
+        import io  # Enter at the prompt: the default answer
+        with unittest.mock.patch.object(sys, "stdin", io.StringIO("\n")), \
+                unittest.mock.patch.object(sys, "stderr", io.StringIO()):
+            heimdall._ask_update_notice()
+        self.assertFalse(heimdall._update_notice_enabled())
+        self.assertEqual(
+            heimdall._update_notice_path().read_text(encoding="utf-8").strip(),
+            "off")
+
+    def test_flag_saves_choice_and_exits(self):
+        self.assertEqual(heimdall.main(["--update-notice", "on"]), 0)
+        self.assertTrue(heimdall._update_notice_enabled())
+        self.assertEqual(heimdall.main(["--update-notice", "off"]), 0)
+        self.assertFalse(heimdall._update_notice_enabled())
+
+
 class NetworkFieldTests(unittest.TestCase):
     """LOCOSP's 2026-08-12 mesh-slot contract: the server now takes both
     MeshCore and Meshtastic, told apart by an authoritative `network` field.

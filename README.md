@@ -190,7 +190,7 @@ Helper scripts for double-click users:
 | `run.sh path/to/your.csv` / `run.bat path\to\your.csv` | Upload a single CSV |
 | `update.sh` / `update.bat` | Self-update to the latest Heimdall |
 
-Heimdall never phones home on its own. If you want to know whether a newer release exists, run `--check-version` and it asks GitHub once and tells you. Nothing else on an ordinary run contacts anybody except the WDGWars upload endpoint, and only when you invoke an upload.
+Heimdall never phones home unless you ask it to. If you want to know whether a newer release exists, run `--check-version` and it asks GitHub once and tells you. If you would rather be told without asking, `setup` offers a release notice (default no), or turn it on later with `--update-notice on`: after an upload it checks GitHub at most once a day and says when a newer version is out. With the notice off, which is the default, nothing on an ordinary run contacts anybody except the WDGWars upload endpoint, and only when you invoke an upload.
 
 ---
 
@@ -264,7 +264,8 @@ Italicised rows are not yet implemented. They are on the roadmap once sample dat
 | `--schedule-time HH:MM` | 24-hour daily run time for `--schedule`. | `03:00` |
 | `--schedule-dry-run` | Install the schedule with `--dry-run` baked in. | off |
 | `--update` | Self-update via `git pull` (clone) or raw-GitHub fetch (ZIP install). | off |
-| `--check-version` | Ask GitHub whether a newer release exists, then exit. The only thing here that contacts GitHub by itself. | off |
+| `--check-version` | Ask GitHub whether a newer release exists, then exit. | off |
+| `--update-notice on\|off` | Opt in to (or out of) a once-a-day release check after uploads. Saves the choice and exits. | off |
 | `-q`, `--quiet` | Suppress informational banners. Errors still print. | off |
 | `--version` | Print version and exit. | (none) |
 | `-h`, `--help` | Print help and exit. | (none) |
@@ -370,8 +371,8 @@ The target per-record schema is `node_id, node_type, name, lat, lon, rssi, first
 - Capture files **never leave your machine** until you explicitly run an upload command without `--dry-run`. Parsing, normalising, and envelope-building all happen locally.
 - The API key is read from `--key` (or the deprecated `--api-key` alias), then `$WDGWARS_API_KEY`, then the saved key file. When `--setup` (or `--save-key`) writes the file, it's `chmod 0600` on Unix and lives under the per-user `%APPDATA%` on Windows.
 - The bundled `examples/sample.csv` is a **scrubbed** export with `lat=0, lon=0` for every row, so it cannot accidentally produce a real upload (the upstream ingest rejects `0,0` GPS).
-- `--check-version` hits `https://api.github.com/repos/Yggdrasil-AI-labs/meshcore-to-wdgwars/releases/latest` with a `heimdall/<version>` User-Agent. It sends nothing about you or your captures, but GitHub is a third party and the request itself shows them four things: your source IP, the version you're on, which tool you're running, and when you ran it. That's why it's a command you type. Earlier releases ran this once a day on almost every invocation with `--no-version-check` as the opt-out. That default is gone; the flag is still accepted and ignored so existing scheduled runs don't break.
-- No telemetry, no analytics, nothing on a timer. On an ordinary run the only outbound traffic is to the WDGWars upload endpoint, and only when you explicitly invoke an upload.
+- `--check-version` hits `https://api.github.com/repos/Yggdrasil-AI-labs/meshcore-to-wdgwars/releases/latest` with a `heimdall/<version>` User-Agent. It sends nothing about you or your captures, but GitHub is a third party and the request itself shows them four things: your source IP, the version you're on, which tool you're running, and when you ran it. That's why it's a command you type, or a notice you switch on yourself (`--update-notice on`, the same request at most once a day, only after an upload). Earlier releases ran this once a day on almost every invocation with `--no-version-check` as the opt-out. That default is gone; the flag is still accepted and ignored so existing scheduled runs don't break.
+- No telemetry, no analytics, nothing on a timer. On an ordinary run the only outbound traffic is to the WDGWars upload endpoint, and only when you explicitly invoke an upload. The one exception is the release notice, and only if you switched it on.
 
 ---
 
